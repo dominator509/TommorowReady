@@ -77,7 +77,7 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 
 # 11. Progress
 - [x] M1 complete with evidence and commit.
-- [ ] M2 complete with evidence and commit.
+- [x] M2 complete with evidence and commit.
 - [ ] M3 complete with evidence and commit.
 
 # 12. Surprises & Discoveries

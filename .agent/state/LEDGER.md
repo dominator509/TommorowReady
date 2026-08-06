@@ -23,3 +23,4 @@
 2026-08-06T21:09:36Z | codex | EP-000 | NODE_DONE | verify: ok; expected-files audit passed; local real services verified; external production proofs remain fail-closed in DEFERRED_EXTERNALS
 2026-08-06T21:11:10Z | codex | EP-001 | LEASE | scheduler NEXT EP-001; foundation artifacts present from verified continuation and CI workflow completed
 2026-08-06T21:13:01Z | codex | EP-001 | MILESTONE_PASS | M1 verify: ok; expected foundation files present including pinned lockfile real compose and CI
+2026-08-06T21:14:48Z | codex | EP-001 | MILESTONE_PASS | M2 verify: ok; monorepo and real local infrastructure reverified
