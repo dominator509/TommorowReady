@@ -18,3 +18,4 @@
 2026-08-06T21:00:21Z | codex | EP-000 | IMPLEMENTATION_FAIL | playwright install chromium exit 124 signature BROWSER_DOWNLOAD_TIMEOUT_364S hypothesis runtime may be absent or partially cached; run exact browser gate once to determine state
 2026-08-06T21:01:12Z | codex | EP-000 | IMPLEMENTATION_FAIL | browser gate exit 1 signature PLAYWRIGHT_CHROMIUM_EXECUTABLE_MISSING diagnostic system Chrome exists at standard Program Files path; use Playwright chrome channel without download
 2026-08-06T21:05:50Z | codex | EP-000 | MILESTONE_PASS | M1 verify: ok; preflight and real local PostgreSQL Valkey S3 SMTP verified
+2026-08-06T21:07:39Z | codex | EP-000 | MILESTONE_PASS | M2 verify: ok; real behavior reverified from clean milestone commit
