@@ -224,7 +224,7 @@ export function calculateReadiness(
 const prohibitedPatterns: readonly RegExp[] = [
   /\b(?:password|passcode|pin|seed phrase|recovery code|private key|safe combination)\s*[:=]\s*\S+/i,
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
-  /\b(?:\d[ -]*?){13,19}\b/,
+  /\b(?:\d{4}[ -]){3}\d{4}\b|\b\d{13,19}\b/,
   /\b\d{3}-\d{2}-\d{4}\b/,
 ];
 export function containsProhibitedSecret(value: string): boolean {

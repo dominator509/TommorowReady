@@ -29,3 +29,6 @@
 2026-08-06T21:17:41Z | codex | EP-002 | LEASE | scheduler NEXT EP-002; domain contracts and unit/property tests present from verified continuation
 2026-08-06T21:19:16Z | codex | EP-002 | MILESTONE_PASS | M1 verify: ok; domain contracts and unit/property tests verified
 2026-08-06T21:21:09Z | codex | EP-002 | MILESTONE_PASS | M2 verify: ok; release state machine readiness helper and packet isolation reverified
+2026-08-06T21:22:34Z | codex | EP-002 | MILESTONE_FAIL | M3 verify exit 1 signature UUID_FALSE_POSITIVE_CARD_DLP hypothesis permissive digit-and-hyphen card regex can classify numeric UUIDs as cards; narrow to contiguous or 4x4 card shapes and add regression
+2026-08-06T21:25:56Z | codex | EP-002 | MILESTONE_PASS | M3 verify: ok after UUID DLP regression; expected-files audit passed
+2026-08-06T21:26:05Z | codex | EP-002 | NODE_DONE | verify: ok; domain contracts unit/property tests audited; DLP false-positive regression fixed

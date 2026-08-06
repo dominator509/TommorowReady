@@ -73,13 +73,17 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 # 11. Progress
 - [x] M1 complete with evidence and commit.
 - [x] M2 complete with evidence and commit.
-- [ ] M3 complete with evidence and commit.
+- [x] M3 complete with evidence and commit.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
+
+- 2026-08-06: Repeated live-fire exposed a UUID/card-pattern collision in DLP. The pattern was narrowed to supported card shapes and a UUID regression was added.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.
 
 # 14. Outcomes & Retrospective
 Complete after verification with files, commands, sentinels, risks, and follow-up.
+
+Deterministic readiness, helper grants, immutable packet manifests, release transitions, tenant/recipient isolation, and prohibited-secret handling are implemented with unit, property, integration, and live-fire evidence.

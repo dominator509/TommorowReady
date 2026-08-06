@@ -15,6 +15,7 @@ describe('domain invariants', () => {
     expect(
       containsProhibitedSecret('Credentials are in the family password manager under Utilities.'),
     ).toBe(false);
+    expect(containsProhibitedSecret('recipient 12345678-1234-1234-1234-123456789012')).toBe(false);
   });
   it('isolates packet recipients and tenants', () => {
     const manifest = buildPacketManifest({
