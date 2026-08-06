@@ -24,3 +24,5 @@
 2026-08-06T21:11:10Z | codex | EP-001 | LEASE | scheduler NEXT EP-001; foundation artifacts present from verified continuation and CI workflow completed
 2026-08-06T21:13:01Z | codex | EP-001 | MILESTONE_PASS | M1 verify: ok; expected foundation files present including pinned lockfile real compose and CI
 2026-08-06T21:14:48Z | codex | EP-001 | MILESTONE_PASS | M2 verify: ok; monorepo and real local infrastructure reverified
+2026-08-06T21:16:37Z | codex | EP-001 | MILESTONE_PASS | M3 verify: ok; expected-files audit passed
+2026-08-06T21:16:47Z | codex | EP-001 | NODE_DONE | verify: ok; foundation expected files audited; CI and accessible application shell verified
