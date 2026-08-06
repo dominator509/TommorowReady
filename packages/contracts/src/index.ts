@@ -11,6 +11,7 @@ export const recordInput = z.object({
   kind: z.string().min(1).max(80),
   payload: z.record(z.string(), z.unknown()),
 });
+export const payloadInput = z.record(z.string(), z.unknown());
 export const packetInput = z.object({
   purpose: z.string().min(3).max(200),
   recipientId: z.string().uuid(),

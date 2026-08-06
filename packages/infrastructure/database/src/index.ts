@@ -37,6 +37,16 @@ const kindTable: Readonly<Record<string, string>> = {
   privacyRequest: 'privacy_requests',
   export: 'exports',
   subscription: 'subscriptions',
+  readinessResult: 'readiness_results',
+  familyIqGap: 'family_iq_gaps',
+  recipient: 'packet_recipients',
+  emergencyPolicy: 'emergency_policies',
+  accessRequest: 'access_requests',
+  verification: 'verification_evidence',
+  challenge: 'challenges',
+  denial: 'denials',
+  releaseAuthorization: 'release_authorizations',
+  releasedPacket: 'released_packets',
 };
 
 export class PostgresContinuityRepository implements ContinuityRepository {

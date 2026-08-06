@@ -10,6 +10,7 @@ import {
   errorEnvelope,
   householdInput,
   packetInput,
+  payloadInput,
   recordInput,
   releaseTransitionInput,
 } from '../../../packages/contracts/src/index.js';
@@ -115,5 +116,47 @@ export function createApp(repository: ContinuityRepository): FastifyInstance {
     });
     return reply.status(202).send(record);
   });
+  const resourceKinds = {
+    people: 'person',
+    dependents: 'dependent',
+    children: 'child',
+    pets: 'pet',
+    contacts: 'contact',
+    helpers: 'helperGrant',
+    accounts: 'account',
+    assets: 'asset',
+    insurance: 'insurance',
+    properties: 'property',
+    'storage-units': 'storageUnit',
+    'document-locations': 'documentLocation',
+    documents: 'document',
+    facts: 'fact',
+    playbooks: 'playbook',
+    wishes: 'funeralWish',
+    letters: 'letter',
+    videos: 'video',
+    advice: 'advice',
+    photos: 'photo',
+    recipes: 'recipe',
+    readiness: 'readinessResult',
+    'family-iq': 'familyIqGap',
+    recipients: 'recipient',
+    'emergency-policies': 'emergencyPolicy',
+    'access-requests': 'accessRequest',
+    verifications: 'verification',
+    challenges: 'challenge',
+    'annual-reviews': 'annualReview',
+    consents: 'consent',
+    exports: 'export',
+    billing: 'subscription',
+  } as const;
+  for (const [route, kind] of Object.entries(resourceKinds)) {
+    app.post(`/v1/${route}`, async (request, reply) =>
+      reply
+        .status(201)
+        .send(await service.createRecord(context(request), kind, payloadInput.parse(request.body))),
+    );
+    app.get(`/v1/${route}`, async (request) => repository.list(context(request), kind));
+  }
   return app;
 }
