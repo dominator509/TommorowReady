@@ -19,3 +19,5 @@
 2026-08-06T21:01:12Z | codex | EP-000 | IMPLEMENTATION_FAIL | browser gate exit 1 signature PLAYWRIGHT_CHROMIUM_EXECUTABLE_MISSING diagnostic system Chrome exists at standard Program Files path; use Playwright chrome channel without download
 2026-08-06T21:05:50Z | codex | EP-000 | MILESTONE_PASS | M1 verify: ok; preflight and real local PostgreSQL Valkey S3 SMTP verified
 2026-08-06T21:07:39Z | codex | EP-000 | MILESTONE_PASS | M2 verify: ok; real behavior reverified from clean milestone commit
+2026-08-06T21:09:27Z | codex | EP-000 | MILESTONE_PASS | M3 verify: ok; expected files COMMANDS.md ENVIRONMENT.md ASSUMPTIONS.md scripts/preflight.sh audited
+2026-08-06T21:09:36Z | codex | EP-000 | NODE_DONE | verify: ok; expected-files audit passed; local real services verified; external production proofs remain fail-closed in DEFERRED_EXTERNALS
