@@ -1,0 +1,54 @@
+{
+  "name": "tomorrowready",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=10 <11"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && pnpm --filter @tomorrowready/web build",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "deploy:production": "tsx scripts/deploy-production.ts",
+    "format:check": "prettier --check .",
+    "lint": "tsx scripts/lint.ts",
+    "live-fire": "tsx scripts/live-fire.ts",
+    "security:check": "tsx scripts/security-check.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "smoke:production": "tsx scripts/smoke-production.ts",
+    "start": "tsx apps/api/src/server.ts",
+    "test:e2e": "vitest run tests/e2e",
+    "test:browser": "playwright test",
+    "test:integration": "vitest run tests/integration --no-file-parallelism",
+    "test:unit": "vitest run tests/unit tests/security",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1105.0",
+    "fastify": "5.11.2",
+    "ioredis": "6.0.0",
+    "next": "16.3.0",
+    "nodemailer": "9.0.4",
+    "pg": "8.22.0",
+    "pino": "10.3.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.1.2",
+    "@types/nodemailer": "8.0.1",
+    "@types/pg": "8.20.4",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@axe-core/playwright": "4.12.1",
+    "fast-check": "4.9.0",
+    "prettier": "3.9.6",
+    "tsx": "4.23.9",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tomorrowready
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tomorrowready-api
+  labels: { environment: local-rehearsal }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: tomorrowready-api }
+  template:
+    metadata:
+      labels: { app: tomorrowready-api }
+    spec:
+      serviceAccountName: tomorrowready
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: api
+          image: tomorrowready-api@sha256:832815949b890ef02274b9bd4572cc257c84ffd4873e58b46c9d6eb36c6c2f71
+          imagePullPolicy: Never
+          ports: [{ name: http, containerPort: 4000 }]
+          envFrom: [{ secretRef: { name: tomorrowready-runtime } }]
+          readinessProbe:
+            { httpGet: { path: /health/ready, port: http }, periodSeconds: 5, failureThreshold: 6 }
+          livenessProbe:
+            { httpGet: { path: /health/live, port: http }, periodSeconds: 10, failureThreshold: 3 }
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: '1', memory: 1Gi } }
+          securityContext:
+            {
+              allowPrivilegeEscalation: false,
+              readOnlyRootFilesystem: true,
+              capabilities: { drop: ['ALL'] },
+            }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tomorrowready-worker
+  labels: { environment: local-rehearsal }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: tomorrowready-worker }
+  template:
+    metadata:
+      labels: { app: tomorrowready-worker }
+    spec:
+      serviceAccountName: tomorrowready
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: worker
+          image: tomorrowready-worker@sha256:d796077103873fc05f9a661b77ad287e05d7284c898cd6f18b96420c6318ab9d
+          imagePullPolicy: Never
+          envFrom: [{ secretRef: { name: tomorrowready-runtime } }]
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: '1', memory: 1Gi } }
+          securityContext:
+            {
+              allowPrivilegeEscalation: false,
+              readOnlyRootFilesystem: true,
+              capabilities: { drop: ['ALL'] },
+            }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tomorrowready-default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tomorrowready-web
+  labels: { environment: local-rehearsal }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: tomorrowready-web }
+  template:
+    metadata:
+      labels: { app: tomorrowready-web }
+    spec:
+      serviceAccountName: tomorrowready
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: web
+          image: tomorrowready-web@sha256:c6f99300cf0c1ba492e2f4b62a5958956f55d0b82f6f9265f9fc5f284ba6c5d5
+          imagePullPolicy: Never
+          ports: [{ name: http, containerPort: 3000 }]
+          readinessProbe:
+            { httpGet: { path: /, port: http }, periodSeconds: 5, failureThreshold: 6 }
+          livenessProbe:
+            { httpGet: { path: /, port: http }, periodSeconds: 10, failureThreshold: 3 }
+          resources:
+            { requests: { cpu: 50m, memory: 128Mi }, limits: { cpu: '500m', memory: 512Mi } }
+          securityContext:
+            {
+              allowPrivilegeEscalation: false,
+              readOnlyRootFilesystem: true,
+              capabilities: { drop: ['ALL'] },
+            }

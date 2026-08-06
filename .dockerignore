@@ -1,0 +1,11 @@
+.git
+.env
+.agent/state/*.log
+.agent/state/*.pid
+.agent/state/backups
+node_modules
+**/.next
+dist
+coverage
+playwright-report
+test-results

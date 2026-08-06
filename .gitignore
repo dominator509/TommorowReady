@@ -9,5 +9,6 @@ playwright-report/
 test-results/
 .agent/state/*.log
 .agent/state/*.pid
+.agent/state/backups/
 *.local
 .DS_Store

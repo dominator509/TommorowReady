@@ -1,4 +1,5 @@
 # Commands
+
 Run from repository root. Coding agents must not invent commands. If a command is missing or stale, update this file first, citing repository evidence, with a Decision Log entry.
 
 ```sh
@@ -6,17 +7,26 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 ```
 
 - Install: `sh scripts/install.sh`
+- Activate package manager: `corepack prepare pnpm@10.34.5 --activate`
+- Bootstrap lockfile: `pnpm install`
 - Preflight: `sh scripts/preflight.sh`
 - Lint: `sh scripts/lint.sh`
 - Format check: `sh scripts/format-check.sh`
+- Format source: `pnpm exec prettier --write .`
+- Restore scope drift: `git restore -- <explicit-paths>`
 - Typecheck: `sh scripts/typecheck.sh`
 - Unit: `sh scripts/test-unit.sh`
 - Integration: `sh scripts/test-integration.sh`
 - E2E: `sh scripts/test-e2e.sh`
+- Browser install: `pnpm exec playwright install chromium`
+- Browser accessibility: `pnpm test:browser`
 - Build: `sh scripts/build.sh`
 - Security: `sh scripts/security-check.sh`
 - Dependency audit: `sh scripts/dependency-audit.sh`
 - Smoke: `sh scripts/smoke-test.sh`
+- Backup: `sh scripts/backup.sh`
+- Restore drill: `sh scripts/restore-drill.sh`
+- Container images: `docker build --target api -t tomorrowready-api:local . && docker build --target web -t tomorrowready-web:local . && docker build --target worker -t tomorrowready-worker:local .`
 - Live-fire: `sh scripts/live-fire.sh`
 - Verify: `sh scripts/verify.sh`
 - Production readiness: `sh scripts/production-readiness-check.sh`

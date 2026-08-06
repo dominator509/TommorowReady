@@ -1,0 +1,13 @@
+.next
+dist
+node_modules
+coverage
+playwright-report
+test-results
+pnpm-lock.yaml
+BLUEPRINT_PACK.md
+*.md
+.agent
+Dockerfile
+.dockerignore
+apps/web/next-env.d.ts

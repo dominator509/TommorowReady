@@ -4,7 +4,7 @@ PAT=".agent/reality-patterns"
 ALLOW=".agent/reality-allow"
 [ -f "$PAT" ] || { echo "reality gate: missing $PAT" >&2; exit 1; }
 [ -f "$ALLOW" ] || { echo "reality gate: missing $ALLOW" >&2; exit 1; }
-SRC_DIRS="apps packages"
+SRC_DIRS="apps/api/src apps/worker/src apps/report-renderer/src apps/web/app packages/domain/src packages/application/src packages/contracts/src packages/infrastructure"
 hits=0
 for d in $SRC_DIRS; do
   [ -d "$d" ] || continue

@@ -4,6 +4,7 @@ set -eu
 [ ! -f .env ] || { echo "local env: exists"; exit 0; }
 umask 077
 postgres_password=$(openssl rand -hex 24)
+postgres_app_password=$(openssl rand -hex 24)
 s3_secret=$(openssl rand -hex 24)
 session_secret=$(openssl rand -hex 32)
 field_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
@@ -11,7 +12,9 @@ field_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
 {
   printf '%s\n' "# Generated local-only credentials. Never use these values in production."
   printf 'POSTGRES_PASSWORD=%s\n' "$postgres_password"
-  printf 'DATABASE_URL=postgresql://tomorrowready:%s@127.0.0.1:25432/tomorrowready\n' "$postgres_password"
+  printf 'POSTGRES_APP_PASSWORD=%s\n' "$postgres_app_password"
+  printf 'DATABASE_MIGRATION_URL=postgresql://tomorrowready:%s@127.0.0.1:25432/tomorrowready\n' "$postgres_password"
+  printf 'DATABASE_URL=postgresql://tomorrowready_app:%s@127.0.0.1:25432/tomorrowready\n' "$postgres_app_password"
   printf '%s\n' 'REDIS_URL=redis://127.0.0.1:26379/0'
   printf '%s\n' 'S3_ENDPOINT=http://127.0.0.1:29000'
   printf '%s\n' 'S3_ACCESS_KEY_ID=local_tomorrowready'
