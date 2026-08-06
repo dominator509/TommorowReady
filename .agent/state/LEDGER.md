@@ -42,3 +42,6 @@
 2026-08-06T21:38:29Z | codex | EP-004 | MILESTONE_PASS | M2 verify: ok; API contracts and orchestration reverified
 2026-08-06T21:40:11Z | codex | EP-004 | MILESTONE_PASS | M3 verify: ok; expected-files audit passed
 2026-08-06T21:40:20Z | codex | EP-004 | NODE_DONE | verify: ok; apps/api packages/application tests/contract audited
+2026-08-06T21:41:19Z | codex | EP-005 | LEASE | scheduler NEXT EP-005; expand accessible guided plan and shared UI contract before milestone verification
+2026-08-06T21:52:32Z | codex | EP-005 | MILESTONE_FAIL | M1 verify exit 1 signature GENERATED_UI_JS_FORMAT hypothesis prior TypeScript emission created packages/ui/src/index.js; remove generated artifact and rerun narrow format check
+2026-08-06T21:54:21Z | codex | EP-005 | MILESTONE_PASS | M1 verify: ok; accessible guided onboarding shared UI vocabulary production build and three browser checks passed

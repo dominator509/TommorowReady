@@ -1,15 +1,7 @@
-const sections = [
-  'People',
-  'What We Own',
-  'Documents and Locations',
-  'Kids and Dependents',
-  'Pets',
-  'Home Playbook',
-  'Wishes and Messages',
-  'Packets',
-  'Trusted Helpers',
-  'Annual Review',
-];
+import Link from 'next/link';
+import { planSections, sectionAnchor } from '@tomorrowready/ui';
+
+const sections = planSections;
 
 export default function HomePage() {
   return (
@@ -21,7 +13,9 @@ export default function HomePage() {
           Build a verified continuity plan in short, resumable sections. You control who sees each
           packet and when.
         </p>
-        <button type="button">Continue my plan</button>
+        <Link className="primary-action" href="/plan">
+          Continue my plan
+        </Link>
       </header>
       <section aria-labelledby="readiness-heading" className="panel">
         <h2 id="readiness-heading">Family Readiness</h2>
@@ -32,7 +26,7 @@ export default function HomePage() {
       </section>
       <nav aria-label="Plan sections" className="grid">
         {sections.map((section) => (
-          <a href={`#${section.toLowerCase().replaceAll(' ', '-')}`} key={section}>
+          <a href={`#${sectionAnchor(section)}`} id={sectionAnchor(section)} key={section}>
             {section}
             <span>Not started</span>
           </a>
@@ -45,6 +39,7 @@ export default function HomePage() {
           executor. It never releases information based only on AI or one uploaded document.
         </p>
       </section>
+      <footer>TomorrowReady keeps drafts private and requires explicit human confirmation.</footer>
     </main>
   );
 }

@@ -52,12 +52,15 @@ h1 {
 h2 {
   font-size: 1.6rem;
 }
-button,
+.primary-action,
+.secondary-action,
 .grid a {
   min-height: 48px;
   border-radius: 0.65rem;
 }
-button {
+.primary-action {
+  display: inline-flex;
+  align-items: center;
   border: 0;
   background: var(--accent);
   color: #fff;
@@ -65,8 +68,18 @@ button {
   font-weight: 700;
   padding: 0.8rem 1.2rem;
   cursor: pointer;
+  text-decoration: none;
 }
-button:focus-visible,
+.secondary-action {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-weight: 700;
+  margin-left: 1rem;
+  padding: 0.8rem 0;
+}
+.primary-action:focus-visible,
+.secondary-action:focus-visible,
 a:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
@@ -100,6 +113,53 @@ a:focus-visible {
   font-size: 0.9rem;
   font-weight: 500;
 }
+.page-title {
+  max-width: 48rem;
+}
+.lede {
+  color: var(--muted);
+  font-size: 1.15rem;
+  max-width: 44rem;
+}
+.steps {
+  list-style: none;
+  margin: 2rem 0;
+  padding: 0;
+}
+.steps li {
+  align-items: flex-start;
+  background: var(--panel);
+  border: 1px solid #d6ded8;
+  border-radius: 1rem;
+  display: flex;
+  gap: 1rem;
+  margin: 0.8rem 0;
+  padding: 1.25rem;
+}
+.steps li > span {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  flex: 0 0 2.5rem;
+  font-weight: 800;
+  height: 2.5rem;
+  justify-content: center;
+}
+.steps h2,
+.steps p {
+  margin: 0;
+}
+.steps p,
+footer {
+  color: var(--muted);
+}
+footer {
+  border-top: 1px solid #c7d1cb;
+  margin-top: 3rem;
+  padding-top: 1rem;
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -109,7 +169,7 @@ a:focus-visible {
   }
 }
 @media print {
-  button,
+  .primary-action,
   .skip-link {
     display: none;
   }

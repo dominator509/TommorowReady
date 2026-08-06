@@ -24,5 +24,17 @@ test('home remains usable at 200 percent zoom and reduced motion', async ({ page
   await page.evaluate(() => {
     document.documentElement.style.zoom = '2';
   });
-  await expect(page.getByRole('button', { name: 'Continue my plan' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Continue my plan' })).toBeVisible();
+});
+
+test('guided plan is keyboard-reachable and preserves the safety boundary', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Continue my plan' }).click();
+  await expect(page).toHaveURL(/\/plan$/);
+  await expect(page.getByRole('heading', { name: 'Start with the essentials.' })).toBeVisible();
+  await expect(
+    page.getByText('Do not enter passwords, private keys, recovery phrases, or safe combinations.'),
+  ).toBeVisible();
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toEqual([]);
 });

@@ -78,6 +78,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@tomorrowready/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       next:
         specifier: 16.3.0
         version: 16.3.0(@playwright/test@1.62.1)(@types/node@26.1.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -100,6 +103,8 @@ importers:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
+
+  packages/ui: {}
 
 packages:
 
