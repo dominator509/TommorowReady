@@ -39,6 +39,31 @@ describe('real local services', () => {
     ).toBeNull();
     await repository.close();
   });
+  it('keeps audit evidence append-only inside the enforced tenant context', async () => {
+    const repository = new PostgresContinuityRepository(required('DATABASE_URL'));
+    const context = {
+      tenantId: crypto.randomUUID(),
+      householdId: crypto.randomUUID(),
+      actorId: crypto.randomUUID(),
+      purpose: 'append-only proof',
+    };
+    await repository.appendAudit(context, 'evidence:test', crypto.randomUUID(), 'a'.repeat(64));
+    const client = await repository.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [context.tenantId]);
+      const selected = await client.query('SELECT id FROM audit_events LIMIT 1');
+      await expect(
+        client.query("UPDATE audit_events SET payload='{}'::jsonb WHERE id=$1", [
+          selected.rows[0].id,
+        ]),
+      ).rejects.toMatchObject({ message: 'append-only table' });
+      await client.query('ROLLBACK');
+    } finally {
+      client.release();
+      await repository.close();
+    }
+  });
   it('round-trips through real Valkey', async () => {
     const queue = new RealQueue(required('REDIS_URL'));
     expect(await queue.roundTrip('durable-boundary')).toBe('durable-boundary');

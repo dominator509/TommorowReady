@@ -32,3 +32,5 @@
 2026-08-06T21:22:34Z | codex | EP-002 | MILESTONE_FAIL | M3 verify exit 1 signature UUID_FALSE_POSITIVE_CARD_DLP hypothesis permissive digit-and-hyphen card regex can classify numeric UUIDs as cards; narrow to contiguous or 4x4 card shapes and add regression
 2026-08-06T21:25:56Z | codex | EP-002 | MILESTONE_PASS | M3 verify: ok after UUID DLP regression; expected-files audit passed
 2026-08-06T21:26:05Z | codex | EP-002 | NODE_DONE | verify: ok; domain contracts unit/property tests audited; DLP false-positive regression fixed
+2026-08-06T21:27:02Z | codex | EP-003 | LEASE | scheduler NEXT EP-003; RLS schema migrations encrypted fields immutable evidence and real PostgreSQL tests present
+2026-08-06T21:29:20Z | codex | EP-003 | MILESTONE_PASS | M1 verify: ok; RLS append-only evidence encryption and real database flows verified
