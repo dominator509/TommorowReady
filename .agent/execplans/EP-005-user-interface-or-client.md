@@ -73,13 +73,20 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 # 11. Progress
 - [x] M1 complete with evidence and commit.
 - [x] M2 complete with evidence and commit.
-- [ ] M3 complete with evidence and commit.
+- [x] M3 complete with evidence and commit.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
+
+- 2026-08-06: Next.js development mode generates scoped agent guidance and requires an explicit local development origin; both are retained so repeated browser runs leave a clean tree.
+- 2026-08-06: A prior compiler invocation left JavaScript duplicates beside TypeScript tests. Removing them restored one-to-one test discovery without changing coverage.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.
 
 # 14. Outcomes & Retrospective
 Complete after verification with files, commands, sentinels, risks, and follow-up.
+
+- Delivered a production-built overview and resumable guided-start route, shared canonical section vocabulary, safety copy, responsive/print behavior, keyboard navigation, reduced-motion handling, and automated axe checks.
+- Observed `verify: ok` on all three milestone passes and `3 passed` from the dedicated browser suite.
+- Remaining authenticated screens depend on the authorization/session work scheduled in EP-006; no production bypass was introduced.

@@ -46,3 +46,5 @@
 2026-08-06T21:52:32Z | codex | EP-005 | MILESTONE_FAIL | M1 verify exit 1 signature GENERATED_UI_JS_FORMAT hypothesis prior TypeScript emission created packages/ui/src/index.js; remove generated artifact and rerun narrow format check
 2026-08-06T21:54:21Z | codex | EP-005 | MILESTONE_PASS | M1 verify: ok; accessible guided onboarding shared UI vocabulary production build and three browser checks passed
 2026-08-06T21:55:54Z | codex | EP-005 | MILESTONE_PASS | M2 verify: ok; real service flows UI build contracts security and fourteen live-fire proofs reverified
+2026-08-06T21:57:41Z | codex | EP-005 | MILESTONE_PASS | M3 verify: ok; expected-files and clean-scope audit passed
+2026-08-06T21:57:41Z | codex | EP-005 | NODE_DONE | verify: ok; production-built accessible overview guided onboarding shared UI contract and browser checks audited
