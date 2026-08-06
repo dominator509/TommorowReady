@@ -40,3 +40,5 @@
 2026-08-06T21:34:00Z | codex | EP-004 | LEASE | scheduler NEXT EP-004; hardening canonical route families and contract coverage before milestone verification
 2026-08-06T21:36:47Z | codex | EP-004 | MILESTONE_PASS | M1 verify: ok; canonical v1 route families stable errors packets release and privacy workflows verified
 2026-08-06T21:38:29Z | codex | EP-004 | MILESTONE_PASS | M2 verify: ok; API contracts and orchestration reverified
+2026-08-06T21:40:11Z | codex | EP-004 | MILESTONE_PASS | M3 verify: ok; expected-files audit passed
+2026-08-06T21:40:20Z | codex | EP-004 | NODE_DONE | verify: ok; apps/api packages/application tests/contract audited
