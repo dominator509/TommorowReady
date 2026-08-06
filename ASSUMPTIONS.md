@@ -10,3 +10,5 @@
 | No bank credential storage | High risk and unnecessary for MVP | Some automation unavailable | Search SECURITY.md and schema | No |
 | DeepSeek is optional and replaceable | Vendor controversy and availability risk | Reduced AI capability when disabled | Provider-failure live-fire | No |
 | Legal text remains draft until counsel approves | No counsel record supplied | Liability and unenforceability | `LEGAL_APPROVAL_RECORD` | Yes for production only |
+| Real local containers may satisfy engineering prerequisites | The operator explicitly authorized local real services and production credentials are unavailable | Provider-specific behavior still requires later authenticated proof | `docker compose up -d --wait` and service probes | No |
+| The generated graph has a phased-verification defect | EP-000 requires full `verify.sh`, while that script requires `package.json` and LF proofs explicitly created only in later nodes | No node can become green in the original order without a continuation record | Initial `sh scripts/verify.sh` output and ExecPlan metadata | No; blocks genuine graph completion until later-node implementation exists |

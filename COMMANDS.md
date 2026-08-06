@@ -21,6 +21,14 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Verify: `sh scripts/verify.sh`
 - Production readiness: `sh scripts/production-readiness-check.sh`
 - Local infrastructure: `docker compose up -d --wait`
+- Local infrastructure status: `docker compose ps`
+- Local infrastructure logs: `docker compose logs --no-color --tail 200`
+- Local port owner: `docker ps --filter publish=1025 --format '{{.ID}} {{.Names}} {{.Ports}}'`
+- Toolchain evidence: `node --version && corepack pnpm --version && docker --version && docker compose version && git --version && psql --version && redis-cli --version`
+- Dependency version evidence: `pnpm view <package> version`
+- Local environment: `sh scripts/bootstrap-local-env.sh`
+- Load local environment: `set -a; . ./.env; set +a`
+- External requirements inventory: `sh scripts/external-requirements.sh`
 - Local start: `pnpm start > .agent/state/local.log 2>&1 & echo $! > .agent/state/local.pid; i=0; until curl -fsS http://127.0.0.1:4000/health/ready >/dev/null; do i=$((i+1)); [ "$i" -lt 30 ] || exit 1; sleep 2; done`
 - Local stop: `test ! -f .agent/state/local.pid || kill "$(cat .agent/state/local.pid)"; docker compose down`
 - Database migration: `pnpm db:migrate`
