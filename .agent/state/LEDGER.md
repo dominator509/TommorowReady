@@ -28,3 +28,4 @@
 2026-08-06T21:16:47Z | codex | EP-001 | NODE_DONE | verify: ok; foundation expected files audited; CI and accessible application shell verified
 2026-08-06T21:17:41Z | codex | EP-002 | LEASE | scheduler NEXT EP-002; domain contracts and unit/property tests present from verified continuation
 2026-08-06T21:19:16Z | codex | EP-002 | MILESTONE_PASS | M1 verify: ok; domain contracts and unit/property tests verified
+2026-08-06T21:21:09Z | codex | EP-002 | MILESTONE_PASS | M2 verify: ok; release state machine readiness helper and packet isolation reverified
