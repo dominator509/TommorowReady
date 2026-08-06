@@ -17,3 +17,4 @@
 2026-08-06T20:48:59Z | codex | EP-000 | IMPLEMENTATION_FAIL | docker api image exit 1 signature NEXT_BINARY_MISSING_AFTER_LAYER_COPY hypothesis workspace symlinks must be refreshed after source overlay in container build stage
 2026-08-06T21:00:21Z | codex | EP-000 | IMPLEMENTATION_FAIL | playwright install chromium exit 124 signature BROWSER_DOWNLOAD_TIMEOUT_364S hypothesis runtime may be absent or partially cached; run exact browser gate once to determine state
 2026-08-06T21:01:12Z | codex | EP-000 | IMPLEMENTATION_FAIL | browser gate exit 1 signature PLAYWRIGHT_CHROMIUM_EXECUTABLE_MISSING diagnostic system Chrome exists at standard Program Files path; use Playwright chrome channel without download
+2026-08-06T21:05:50Z | codex | EP-000 | MILESTONE_PASS | M1 verify: ok; preflight and real local PostgreSQL Valkey S3 SMTP verified
