@@ -1,0 +1,4 @@
+# Loops
+Run loop repeatedly calls graph-next until ALL_DONE or BLOCKED. Node loop executes milestones in order, verifies, audits files, appends NODE_DONE, and tags green. Milestone loop allows six total attempts: first targeted fix; second isolate with narrow diagnostic; third take declared fallback; if fallback exhausts, roll back and try once clean; then NODE_BLOCKED with evidence. Same fix may not repeat. New signature resets rung but not total cap.
+
+Readiness loops use at most 30 probes separated by 2 seconds and record a kill command. Watchdogs force rung escalation after identical command/output three times, heartbeat after ten silent actions, revert undeclared paths, and treat budget overrun as rung three. At every milestone re-read milestone, node non-goals, and ledger tail. Commands are non-interactive. Blocked reports include exact blocker, outputs, exit codes, signatures, hypotheses, diffs, smallest human decision, and recommended default.

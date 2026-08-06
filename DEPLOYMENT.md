@@ -1,0 +1,2 @@
+# Deployment
+Build immutable web, API, and worker images. Apply expand migrations before application rollout. Deploy staging, run migration checks, health, smoke, E2E subset, provider probes, and action reconciliation test. Production deployment is MANUAL because auto-deploy is not authorized. Exact command after infrastructure values are supplied: `pnpm deploy:production`. Post-deploy run `pnpm smoke:production`. Roll back application images first; database contraction occurs only in a later release after compatibility proof.

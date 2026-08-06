@@ -1,0 +1,7 @@
+# SPEC-002 Data Model
+
+Every tenant-owned table includes `tenant_id`, opaque `id`, `created_at`, and where mutable `updated_at` plus `version`. Household-owned rows also include `household_id`. Restricted values use encrypted envelopes. PostgreSQL RLS denies missing tenant context.
+
+Canonical tables include users, identities, tenants, households, memberships, people, dependents, children, pets, relationships, helper_grants, professional_contacts, emergency_contacts, account_locators, assets, debts, insurance_records, properties, storage_units, document_locations, documents, document_versions, extracted_candidates, confirmed_facts, playbooks, playbook_sections, funeral_wishes, letters, video_messages, advice_items, photos, recipes, evidence_references, readiness_rule_versions, readiness_results, family_iq_gaps, packet_definitions, packet_manifests, packet_manifest_items, packet_recipients, emergency_policies, access_requests, verification_evidence, challenges, denials, release_authorizations, released_packets, consents, annual_reviews, privacy_requests, exports, audit_events, outbox_events, inbox_events, jobs, subscriptions, and ai_usage.
+
+Audit events, consent versions, verification evidence, release authorizations, released packet manifests, and original media references are append-only. Deletion uses tombstones, retention checks, asynchronous purge, and purge evidence. No table stores raw passwords, seed phrases, recovery codes, private keys, safe combinations, or full card data.

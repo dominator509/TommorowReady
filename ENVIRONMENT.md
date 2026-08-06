@@ -1,0 +1,2 @@
+# Environment
+Node.js 24.x, pnpm 10.x through Corepack, Docker 27+, PostgreSQL client 17+, Git 2.45+, curl, jq, OpenSSL, and POSIX sh are required. Local uses Docker Compose services. Test uses isolated databases and buckets. Staging mirrors production providers with sandbox accounts. Production uses secret management and manual approval. Every environment variable is validated at startup; unknown production variables fail review, missing required variables fail startup, and secrets are redacted.
