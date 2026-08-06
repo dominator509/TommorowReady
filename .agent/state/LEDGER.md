@@ -35,3 +35,5 @@
 2026-08-06T21:27:02Z | codex | EP-003 | LEASE | scheduler NEXT EP-003; RLS schema migrations encrypted fields immutable evidence and real PostgreSQL tests present
 2026-08-06T21:29:20Z | codex | EP-003 | MILESTONE_PASS | M1 verify: ok; RLS append-only evidence encryption and real database flows verified
 2026-08-06T21:31:10Z | codex | EP-003 | MILESTONE_PASS | M2 verify: ok; tenant isolation and immutable audit reverified
+2026-08-06T21:32:56Z | codex | EP-003 | MILESTONE_PASS | M3 verify: ok; expected-files audit passed
+2026-08-06T21:33:05Z | codex | EP-003 | NODE_DONE | verify: ok; RLS migrations append-only evidence encryption and real PostgreSQL tests audited

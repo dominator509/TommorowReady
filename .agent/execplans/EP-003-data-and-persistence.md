@@ -73,7 +73,7 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 # 11. Progress
 - [x] M1 complete with evidence and commit.
 - [x] M2 complete with evidence and commit.
-- [ ] M3 complete with evidence and commit.
+- [x] M3 complete with evidence and commit.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
@@ -83,3 +83,5 @@ Append decisions with alternatives, evidence, and consequences.
 
 # 14. Outcomes & Retrospective
 Complete after verification with files, commands, sentinels, risks, and follow-up.
+
+PostgreSQL is authoritative with forced RLS under a distinct non-superuser application role. Canonical tables, append-only evidence, packet-manifest uniqueness, encryption, and real service round-trips are verified; production managed-service credentials remain deferred.
