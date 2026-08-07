@@ -74,13 +74,19 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 # 11. Progress
 - [x] M1 complete with evidence and commit.
 - [x] M2 complete with evidence and commit.
-- [ ] M3 complete with evidence and commit.
+- [x] M3 complete with evidence and commit.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
+
+- 2026-08-07: The resumed Windows session did not inherit Git's Unix tools on PATH. Running the declared commands in non-interactive Git Bash restored `awk`, `mktemp`, and the exact shell behavior without changing repository commands.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.
 
 # 14. Outcomes & Retrospective
 Complete after verification with files, commands, sentinels, risks, and follow-up.
+
+- Implemented deny-by-default tenant and household authorization, step-up enforcement, packet-specific recipient access, time-bounded customer-approved support access, and checksum/magic/MIME/malware upload gates.
+- Existing password hashing, TOTP, signed sessions, field encryption, DLP, AI consent, stable prompt caching, and provider fail-closed behavior remain covered.
+- Observed `verify: ok` on all three milestone passes; the expected-files audit and clean-scope check passed.
