@@ -73,7 +73,7 @@ Run node verification, expected-files audit, scope diff, and relevant live-fire 
 Re-enter from the last milestone commit. Read ledger and progress. Re-run the last sentinel. Use the bounded ladder and rollback without crossing a green tag.
 
 # 11. Progress
-- [ ] M1 complete with evidence and commit.
+- [x] M1 complete with evidence and commit.
 - [ ] M2 complete with evidence and commit.
 - [ ] M3 complete with evidence and commit.
 

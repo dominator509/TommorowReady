@@ -1,5 +1,14 @@
 .git
 .env
+.agent
+.github
+.codex
+.serena
+*.md
+docker-compose.yml
+infrastructure
+playwright.config.ts
+tests
 .agent/state/*.log
 .agent/state/*.pid
 .agent/state/backups

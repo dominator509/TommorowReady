@@ -15,11 +15,12 @@ RUN pnpm install --frozen-lockfile && pnpm build
 
 FROM node:24.14.1-alpine AS api
 WORKDIR /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production HOST=0.0.0.0
 COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
 COPY --from=build --chown=node:node /workspace/dist ./dist
 USER node
 EXPOSE 4000
+HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD node -e "fetch('http://127.0.0.1:4000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["node", "dist/apps/api/src/server.js"]
 
 FROM node:24.14.1-alpine AS web
@@ -30,6 +31,7 @@ COPY --from=build --chown=node:node /workspace/apps/web/.next/static ./apps/web/
 COPY --from=build --chown=node:node /workspace/apps/web/public ./apps/web/public
 USER node
 EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD node -e "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["node", "apps/web/server.js"]
 
 FROM api AS worker

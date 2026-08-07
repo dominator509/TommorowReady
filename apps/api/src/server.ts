@@ -19,4 +19,4 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   void close().then(() => process.exit(0));
 });
-await app.listen({ host: '127.0.0.1', port: 4000 });
+await app.listen({ host: process.env.HOST ?? '127.0.0.1', port: 4000 });

@@ -1,0 +1,34 @@
+name: Release Rehearsal
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-rehearsal-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  local-equivalent:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: { persist-credentials: false }
+      - name: Enable pinned pnpm
+        run: corepack enable && corepack prepare pnpm@10.34.5 --activate
+      - name: Generate isolated configuration
+        run: sh scripts/bootstrap-local-env.sh
+      - name: Start real dependencies
+        run: docker compose up -d --wait
+      - name: Install locked dependencies and browser
+        run: sh scripts/install.sh && pnpm exec playwright install chromium
+      - name: Apply migrations and verify
+        run: pnpm db:migrate && sh scripts/verify.sh
+      - name: Build immutable targets
+        run: docker build --provenance=false --target api -t tomorrowready-api:local . && docker build --provenance=false --target web -t tomorrowready-web:local . && docker build --provenance=false --target worker -t tomorrowready-worker:local .
+      - name: Rehearse non-root containers
+        run: sh infrastructure/rehearse-containers.sh
+      - name: Capture local image evidence
+        run: docker images --digests --format '{{.Repository}} {{.Digest}}' | grep '^tomorrowready-'
+      - name: Teardown
+        if: always()
+        run: docker compose down

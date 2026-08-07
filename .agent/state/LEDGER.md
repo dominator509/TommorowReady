@@ -64,3 +64,6 @@
 2026-08-07T22:51:07Z | codex | EP-008 | MILESTONE_PASS | M2 verify: ok; structured telemetry readiness redaction alerts and operations evidence reverified
 2026-08-07T22:53:01Z | codex | EP-008 | MILESTONE_PASS | M3 verify: ok; expected-files clean-scope and no-generated-source audit passed
 2026-08-07T22:53:01Z | codex | EP-008 | NODE_DONE | verify: ok; privacy-safe logs metrics alerts readiness backup restore deletion and incident operations audited
+2026-08-07T22:53:16Z | codex | EP-009 | LEASE | scheduler NEXT EP-009; validate immutable images deployment rollback migration and local rehearsal artifacts
+2026-08-07T23:06:02Z | codex | EP-009 | MILESTONE_FAIL | M1 container rehearsal exit 1 signature WEB_STARTUP_EMPTY_REPLY hypothesis web readiness used one immediate curl while API used bounded polling; apply same bounded readiness loop to both images
+2026-08-07T23:08:23Z | codex | EP-009 | MILESTONE_PASS | M1 verify: ok; stable immutable non-root images bounded container rehearsal deployment baseline and rollback evidence passed

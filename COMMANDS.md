@@ -26,7 +26,8 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Smoke: `sh scripts/smoke-test.sh`
 - Backup: `sh scripts/backup.sh`
 - Restore drill: `sh scripts/restore-drill.sh`
-- Container images: `docker build --target api -t tomorrowready-api:local . && docker build --target web -t tomorrowready-web:local . && docker build --target worker -t tomorrowready-worker:local .`
+- Container images: `docker build --provenance=false --target api -t tomorrowready-api:local . && docker build --provenance=false --target web -t tomorrowready-web:local . && docker build --provenance=false --target worker -t tomorrowready-worker:local .`
+- Container rehearsal: `sh infrastructure/rehearse-containers.sh`
 - Live-fire: `sh scripts/live-fire.sh`
 - Verify: `sh scripts/verify.sh`
 - Production readiness: `sh scripts/production-readiness-check.sh`

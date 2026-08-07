@@ -4,6 +4,22 @@ metadata:
   name: tomorrowready
 automountServiceAccountToken: false
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomorrowready-api
+spec:
+  selector: { app: tomorrowready-api }
+  ports: [{ name: http, port: 4000, targetPort: http }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomorrowready-web
+spec:
+  selector: { app: tomorrowready-web }
+  ports: [{ name: http, port: 3000, targetPort: http }]
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,7 +37,7 @@ spec:
       securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: api
-          image: tomorrowready-api@sha256:832815949b890ef02274b9bd4572cc257c84ffd4873e58b46c9d6eb36c6c2f71
+          image: tomorrowready-api@sha256:a02406d473db46b90d89f6d45d887ea071b036451eae0d96f7f77116fa7dcfdc
           imagePullPolicy: Never
           ports: [{ name: http, containerPort: 4000 }]
           envFrom: [{ secretRef: { name: tomorrowready-runtime } }]
@@ -54,7 +70,7 @@ spec:
       securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: worker
-          image: tomorrowready-worker@sha256:d796077103873fc05f9a661b77ad287e05d7284c898cd6f18b96420c6318ab9d
+          image: tomorrowready-worker@sha256:9f9385ee3e48afeea7b0185c9087eb10550bde306161624155bc615e6ba24866
           imagePullPolicy: Never
           envFrom: [{ secretRef: { name: tomorrowready-runtime } }]
           resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: '1', memory: 1Gi } }
@@ -90,7 +106,7 @@ spec:
       securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: web
-          image: tomorrowready-web@sha256:c6f99300cf0c1ba492e2f4b62a5958956f55d0b82f6f9265f9fc5f284ba6c5d5
+          image: tomorrowready-web@sha256:40379c2e3ab55fe0184d5087b7b51acc7f7aea2a55b2c13fe0488d9577467295
           imagePullPolicy: Never
           ports: [{ name: http, containerPort: 3000 }]
           readinessProbe:
