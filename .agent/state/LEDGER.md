@@ -73,3 +73,4 @@
 2026-08-07T23:12:38Z | codex | EP-010 | LEASE | scheduler NEXT EP-010; run final local gates and produce maximum-engineering-complete external handoff without claiming ship approval
 2026-08-07T23:16:51Z | codex | EP-010 | EXTERNAL_DEFERRED | production readiness exit 1 after verify: ok; exact blocker legal approval evidence missing; insurance authorization KMS vendor platform DNS and production probes remain deferred
 2026-08-07T23:20:23Z | codex | EP-010 | MILESTONE_PASS | M1 verify: ok; release status production evidence matrix and exact external handoff authored
+2026-08-07T23:22:13Z | codex | EP-010 | MILESTONE_PASS | M2 verify: ok and container rehearsal: ok; final local behavior reverified while production evidence remains deferred
