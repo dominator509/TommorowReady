@@ -74,3 +74,5 @@
 2026-08-07T23:16:51Z | codex | EP-010 | EXTERNAL_DEFERRED | production readiness exit 1 after verify: ok; exact blocker legal approval evidence missing; insurance authorization KMS vendor platform DNS and production probes remain deferred
 2026-08-07T23:20:23Z | codex | EP-010 | MILESTONE_PASS | M1 verify: ok; release status production evidence matrix and exact external handoff authored
 2026-08-07T23:22:13Z | codex | EP-010 | MILESTONE_PASS | M2 verify: ok and container rehearsal: ok; final local behavior reverified while production evidence remains deferred
+2026-08-07T23:24:47Z | codex | EP-010 | MILESTONE_PASS | M3 verify: ok and container rehearsal: ok; expected-files service-health and handoff audit passed
+2026-08-07T23:24:47Z | codex | EP-010 | ENGINEERING_COMPLETE_EXTERNAL_UNVERIFIED | all locally executable graph work complete; ship gate exit 1 on legal approval evidence; resume commands and all externals consolidated; NODE_DONE and green tag withheld

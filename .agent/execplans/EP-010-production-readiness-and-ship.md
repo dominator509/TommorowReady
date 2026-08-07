@@ -73,13 +73,20 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 # 11. Progress
 - [x] M1 complete with evidence and commit.
 - [x] M2 complete with evidence and commit.
-- [ ] M3 complete with evidence and commit.
+- [x] M3 complete with evidence and commit.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
+
+- 2026-08-07: The unchanged production gate executes the entire green local sentinel before failing on the first missing external item. Its observed exit was 1 with `production readiness: FAIL - legal approval evidence missing`.
+- 2026-08-07: All local EP-010 milestones can be committed, but the graph must remain `RESUME EP-010`; external evidence is not a valid `NODE_DONE` substitute.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.
 
 # 14. Outcomes & Retrospective
 Complete after verification with files, commands, sentinels, risks, and follow-up.
+
+- Three final local passes emitted `verify: ok`; the last two also emitted `container rehearsal: ok`. Expected readiness/release/handoff files and healthy local dependencies were audited.
+- `REMOTE_SESSION_HANDOFF.md` consolidates every graph node, subsystem, external requirement, probe, validation, legal/business action, known risk, resume command, and operator action.
+- EP-010 is engineering complete but externally unverified. No `NODE_DONE`, `green/EP-010`, semantic release tag, registry push, external mutation, or production deployment is permitted.
