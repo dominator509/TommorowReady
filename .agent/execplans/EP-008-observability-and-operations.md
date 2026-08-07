@@ -73,13 +73,20 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 # 11. Progress
 - [x] M1 complete with evidence and commit.
 - [x] M2 complete with evidence and commit.
-- [ ] M3 complete with evidence and commit.
+- [x] M3 complete with evidence and commit.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
+
+- 2026-08-07: Wiring the Pino instance narrowed Fastify's inferred logger generic. Casting it to the installed Fastify base-logger contract preserves the supported runtime API and the public `createApp` return contract.
+- 2026-08-07: TypeScript 7 emitted source-adjacent JavaScript during a failed CLI-only `--noEmit` check. Repository-level `noEmit: true` plus an explicit build override prevents duplicate test discovery while retaining production compilation.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.
 
 # 14. Outcomes & Retrospective
 Complete after verification with files, commands, sentinels, risks, and follow-up.
+
+- Delivered privacy-safe API logging, validated structured events, bounded low-cardinality metrics, alert-to-runbook routing, real database readiness, and fail-closed `503` behavior.
+- Operations and observability documents now separate locally proven controls from production SLO, alert-delivery, RPO, and RTO evidence.
+- Three milestone verification passes emitted `verify: ok`; expected files, clean scope, and absence of source-adjacent JavaScript were audited.

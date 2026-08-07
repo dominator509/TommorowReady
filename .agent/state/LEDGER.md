@@ -62,3 +62,5 @@
 2026-08-07T22:42:42Z | codex | EP-008 | MILESTONE_FAIL | M1 focused typecheck exit 1 signature FASTIFY_LOGGER_GENERIC_AND_SOURCE_EMIT hypothesis logger inference narrows Fastify return type and TypeScript 7 CLI noEmit did not prevent source-adjacent output; cast to Fastify base contract and enforce noEmit in tsconfig with build override
 2026-08-07T22:49:19Z | codex | EP-008 | MILESTONE_PASS | M1 verify: ok; privacy-safe API logs bounded telemetry real readiness alert mapping backup restore and runbook evidence passed
 2026-08-07T22:51:07Z | codex | EP-008 | MILESTONE_PASS | M2 verify: ok; structured telemetry readiness redaction alerts and operations evidence reverified
+2026-08-07T22:53:01Z | codex | EP-008 | MILESTONE_PASS | M3 verify: ok; expected-files clean-scope and no-generated-source audit passed
+2026-08-07T22:53:01Z | codex | EP-008 | NODE_DONE | verify: ok; privacy-safe logs metrics alerts readiness backup restore deletion and incident operations audited
