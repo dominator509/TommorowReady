@@ -73,13 +73,20 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 # 11. Progress
 - [x] M1 complete with evidence and commit.
 - [x] M2 complete with evidence and commit.
-- [ ] M3 complete with evidence and commit.
+- [x] M3 complete with evidence and commit.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
+
+- 2026-08-07: Accessibility was previously a separate command and backup/restore were outside the main sentinel. Bringing them into `verify.sh` prevents a green node from omitting those required gates.
+- 2026-08-07: Local Windows verification uses installed Chrome while GitHub Actions installs the pinned Playwright Chromium runtime; the same three browser assertions run in both environments.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.
 
 # 14. Outcomes & Retrospective
 Complete after verification with files, commands, sentinels, risks, and follow-up.
+
+- The main sentinel now proves 24 unit/security tests, 7 real integration/contract tests, 3 API/performance E2E tests, 3 browser accessibility tests, a production web build, security and dependency audits, LF-01 through LF-14, a real database backup, and an isolated restore drill.
+- Emergency release property testing now varies every independent approval predicate, and packet hashing is proven order-canonical.
+- Three consecutive expanded verification passes emitted `verify: ok`; expected files, clean scope, and the non-empty backup artifact were audited.

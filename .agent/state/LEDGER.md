@@ -56,3 +56,5 @@
 2026-08-07T22:30:16Z | codex | EP-007 | LEASE | scheduler NEXT EP-007; expand verification to browser backup restore and deployment-relevant drills
 2026-08-07T22:35:36Z | codex | EP-007 | MILESTONE_PASS | M1 verify: ok; 24 unit-security tests browser accessibility fourteen live-fire proofs backup and restore passed
 2026-08-07T22:37:14Z | codex | EP-007 | MILESTONE_PASS | M2 verify: ok; expanded deterministic matrix browser backup and restore reverified
+2026-08-07T22:39:04Z | codex | EP-007 | MILESTONE_PASS | M3 verify: ok; expected-files clean-scope and non-empty backup artifact audited
+2026-08-07T22:39:04Z | codex | EP-007 | NODE_DONE | verify: ok; unit property integration e2e browser accessibility security performance live-fire backup and restore gates audited
