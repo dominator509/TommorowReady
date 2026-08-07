@@ -62,6 +62,14 @@ export class PostgresContinuityRepository implements ContinuityRepository {
   async close(): Promise<void> {
     await this.pool.end();
   }
+  async ready(): Promise<boolean> {
+    try {
+      const result = await this.pool.query('SELECT 1 AS ready');
+      return result.rows[0]?.ready === 1;
+    } catch {
+      return false;
+    }
+  }
   private async transaction<T>(
     context: RequestContext,
     operation: (client: PoolClient) => Promise<T>,

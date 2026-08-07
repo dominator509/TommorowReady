@@ -8,3 +8,13 @@ Alerts include unauthorized-release attempt, unusual recipient velocity, owner-n
 
 ## SLOs
 99.9 percent monthly API availability after launch stabilization; owner challenge notifications begin within five minutes for 99 percent of requests; no unauthorized release; queue age under five minutes for ordinary jobs; RPO 15 minutes and RTO 4 hours after production validation.
+
+## Implemented controls and evidence
+
+- The API uses the privacy-safe Pino instance. Request bodies and authorization, cookie, token, password, prompt, document, packet-content, child-detail, and secret fields are censored before serialization.
+- Operational events require request and trace identifiers, module, operation, result, and non-negative latency. Content bodies are not part of the event contract.
+- Metrics accept only the declared operational names and low-cardinality labels (`module`, `operation`, `result`, `provider`, and `error_code`). Tenant, household, actor, packet, document, and content values are rejected as metric labels.
+- Each required security alert resolves to a named incident runbook. Alert delivery remains production-provider dependent and must not be considered live until the production monitoring destination is configured and probed.
+- `/health/live` proves only that the API process can answer. `/health/ready` and `/v1/health/ready` execute a real database query and return `503` with the failed dependency when PostgreSQL is unavailable.
+
+Local verification proves event validation, nested credential/content redaction, bounded metrics, alert-to-runbook mapping, database readiness failure, backup, and isolated restore. Monthly availability, production notification latency, RPO, and RTO are launch SLOs and remain externally unverified until production telemetry and drills exist.

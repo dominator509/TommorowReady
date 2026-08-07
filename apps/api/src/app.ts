@@ -1,4 +1,8 @@
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import Fastify, {
+  type FastifyBaseLogger,
+  type FastifyInstance,
+  type FastifyRequest,
+} from 'fastify';
 import { randomUUID } from 'node:crypto';
 import {
   ContinuityService,
@@ -19,6 +23,7 @@ import {
   transitionRelease,
   type ReleaseState,
 } from '../../../packages/domain/src/index.js';
+import { createPrivacySafeLogger } from '../../../packages/infrastructure/observability/src/index.js';
 
 function context(request: FastifyRequest): RequestContext {
   const parsed = contextHeaders.safeParse(request.headers);
@@ -37,7 +42,7 @@ function context(request: FastifyRequest): RequestContext {
 
 export function createApp(repository: ContinuityRepository): FastifyInstance {
   const app = Fastify({
-    logger: false,
+    loggerInstance: createPrivacySafeLogger(process.env.LOG_LEVEL ?? 'info') as FastifyBaseLogger,
     genReqId: () => randomUUID(),
     bodyLimit: 1_048_576,
     requestTimeout: 15_000,
@@ -71,8 +76,15 @@ export function createApp(repository: ContinuityRepository): FastifyInstance {
       );
   });
   app.get('/health/live', async () => ({ status: 'ok' }));
-  app.get('/health/ready', async () => ({ status: 'ok', service: 'api' }));
-  app.get('/v1/health/ready', async () => ({ status: 'ok', service: 'api' }));
+  const readiness = async (_request: FastifyRequest, reply: { status(code: number): unknown }) => {
+    if (!(await repository.ready())) {
+      reply.status(503);
+      return { status: 'unavailable', service: 'api', dependency: 'database' };
+    }
+    return { status: 'ok', service: 'api' };
+  };
+  app.get('/health/ready', readiness);
+  app.get('/v1/health/ready', readiness);
   app.post('/v1/households', async (request, reply) => {
     const input = householdInput.parse(request.body);
     const record = await service.createRecord(context(request), 'household', input);

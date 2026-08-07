@@ -1,5 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "outDir": "dist", "declaration": true, "sourceMap": true },
+  "compilerOptions": {
+    "outDir": "dist",
+    "declaration": true,
+    "sourceMap": true,
+    "noEmit": false
+  },
   "exclude": ["node_modules", "dist", "apps/web", "tests"]
 }

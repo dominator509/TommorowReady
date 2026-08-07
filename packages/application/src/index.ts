@@ -20,6 +20,7 @@ export type StoredRecord = Readonly<{
   version: number;
 }>;
 export interface ContinuityRepository {
+  ready(): Promise<boolean>;
   create(
     context: RequestContext,
     kind: string,

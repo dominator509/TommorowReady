@@ -45,4 +45,17 @@ describe('versioned API contracts', () => {
     await app.close();
     await repository.close();
   });
+  it('fails readiness closed when the authoritative database is unavailable', async () => {
+    const repository = new PostgresContinuityRepository(process.env.DATABASE_URL!);
+    await repository.close();
+    const app = createApp(repository);
+    const response = await app.inject({ method: 'GET', url: '/health/ready' });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      status: 'unavailable',
+      service: 'api',
+      dependency: 'database',
+    });
+    await app.close();
+  });
 });

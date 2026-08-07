@@ -58,3 +58,6 @@
 2026-08-07T22:37:14Z | codex | EP-007 | MILESTONE_PASS | M2 verify: ok; expanded deterministic matrix browser backup and restore reverified
 2026-08-07T22:39:04Z | codex | EP-007 | MILESTONE_PASS | M3 verify: ok; expected-files clean-scope and non-empty backup artifact audited
 2026-08-07T22:39:04Z | codex | EP-007 | NODE_DONE | verify: ok; unit property integration e2e browser accessibility security performance live-fire backup and restore gates audited
+2026-08-07T22:39:18Z | codex | EP-008 | LEASE | scheduler NEXT EP-008; harden privacy-safe telemetry health operations and incident runbooks
+2026-08-07T22:42:42Z | codex | EP-008 | MILESTONE_FAIL | M1 focused typecheck exit 1 signature FASTIFY_LOGGER_GENERIC_AND_SOURCE_EMIT hypothesis logger inference narrows Fastify return type and TypeScript 7 CLI noEmit did not prevent source-adjacent output; cast to Fastify base contract and enforce noEmit in tsconfig with build override
+2026-08-07T22:49:19Z | codex | EP-008 | MILESTONE_PASS | M1 verify: ok; privacy-safe API logs bounded telemetry real readiness alert mapping backup restore and runbook evidence passed
