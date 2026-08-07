@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
 export type EncryptedEnvelope = Readonly<{
   algorithm: 'aes-256-gcm';
@@ -33,4 +33,47 @@ export function decryptRestricted(envelope: EncryptedEnvelope, base64Key: string
     decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
     decipher.final(),
   ]).toString('utf8');
+}
+
+export type UploadPolicy = Readonly<{
+  maxBytes: number;
+  allowedMimeTypes: Readonly<Record<string, readonly string[]>>;
+}>;
+
+export type QuarantinedUpload = Readonly<{
+  filename: string;
+  declaredMimeType: string;
+  bytes: Buffer;
+  checksumSha256: string;
+  malwareStatus: 'pending' | 'clean' | 'infected' | 'error';
+}>;
+
+const executableMagic = [Buffer.from('4d5a', 'hex'), Buffer.from('7f454c46', 'hex')];
+
+export function validateQuarantinedUpload(
+  upload: QuarantinedUpload,
+  policy: UploadPolicy,
+): Readonly<{ accepted: true; detectedType: string }> {
+  if (upload.bytes.length === 0 || upload.bytes.length > policy.maxBytes)
+    throw new Error('UPLOAD_SIZE_REJECTED');
+  if (executableMagic.some((magic) => upload.bytes.subarray(0, magic.length).equals(magic)))
+    throw new Error('UPLOAD_EXECUTABLE_REJECTED');
+  const extension = upload.filename.includes('.')
+    ? `.${upload.filename.split('.').pop()!.toLowerCase()}`
+    : '';
+  const allowedExtensions = policy.allowedMimeTypes[upload.declaredMimeType];
+  if (!allowedExtensions?.includes(extension)) throw new Error('UPLOAD_TYPE_REJECTED');
+  const detectedType = detectMimeType(upload.bytes);
+  if (detectedType !== upload.declaredMimeType) throw new Error('UPLOAD_MAGIC_MISMATCH');
+  const checksum = createHash('sha256').update(upload.bytes).digest('hex');
+  if (checksum !== upload.checksumSha256) throw new Error('UPLOAD_CHECKSUM_MISMATCH');
+  if (upload.malwareStatus !== 'clean') throw new Error('UPLOAD_NOT_MALWARE_CLEARED');
+  return { accepted: true, detectedType };
+}
+
+function detectMimeType(bytes: Buffer): string {
+  if (bytes.subarray(0, 5).toString('ascii') === '%PDF-') return 'application/pdf';
+  if (bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) return 'image/png';
+  if (bytes.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex'))) return 'image/jpeg';
+  throw new Error('UPLOAD_MAGIC_UNSUPPORTED');
 }

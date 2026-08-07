@@ -66,3 +66,90 @@ export function verifySession(
   >;
   return typeof value.exp === 'number' && value.exp > now.getTime() ? value : null;
 }
+
+export type SensitiveAction =
+  | 'arm-emergency-policy'
+  | 'change-release-recipient'
+  | 'approve-release'
+  | 'export-full-archive'
+  | 'change-encryption-settings'
+  | 'delete-household'
+  | 'grant-restricted-category';
+
+export type SessionAssurance = 'password' | 'mfa' | 'passkey';
+
+export function requiresStepUp(action: string): action is SensitiveAction {
+  return new Set<string>([
+    'arm-emergency-policy',
+    'change-release-recipient',
+    'approve-release',
+    'export-full-archive',
+    'change-encryption-settings',
+    'delete-household',
+    'grant-restricted-category',
+  ]).has(action);
+}
+
+export type AuthorizationContext = Readonly<{
+  tenantId: string;
+  householdId: string;
+  role: 'owner' | 'trusted-helper' | 'packet-recipient' | 'support';
+  assurance: SessionAssurance;
+  actionGrants: readonly string[];
+  categoryGrants: readonly string[];
+  packetGrants: readonly string[];
+  purpose: string;
+  expiresAt?: Date;
+  customerApproved?: boolean;
+  reason?: string;
+}>;
+
+export type ProtectedResource = Readonly<{
+  tenantId: string;
+  householdId: string;
+  category?: string;
+  packetId?: string;
+}>;
+
+export type AuthorizationDecision =
+  | Readonly<{ allowed: true }>
+  | Readonly<{
+      allowed: false;
+      reason:
+        | 'TENANT_MISMATCH'
+        | 'HOUSEHOLD_MISMATCH'
+        | 'STEP_UP_REQUIRED'
+        | 'ACTION_NOT_GRANTED'
+        | 'CATEGORY_NOT_GRANTED'
+        | 'PACKET_NOT_GRANTED'
+        | 'SUPPORT_APPROVAL_REQUIRED'
+        | 'GRANT_EXPIRED';
+    }>;
+
+export function authorize(
+  context: AuthorizationContext,
+  action: string,
+  resource: ProtectedResource,
+  now = new Date(),
+): AuthorizationDecision {
+  if (context.tenantId !== resource.tenantId) return { allowed: false, reason: 'TENANT_MISMATCH' };
+  if (context.householdId !== resource.householdId)
+    return { allowed: false, reason: 'HOUSEHOLD_MISMATCH' };
+  if (requiresStepUp(action) && context.assurance === 'password')
+    return { allowed: false, reason: 'STEP_UP_REQUIRED' };
+  if (context.role === 'owner') return { allowed: true };
+  if (!context.expiresAt || context.expiresAt <= now)
+    return { allowed: false, reason: 'GRANT_EXPIRED' };
+  if (context.role === 'support' && (!context.customerApproved || !context.reason?.trim()))
+    return { allowed: false, reason: 'SUPPORT_APPROVAL_REQUIRED' };
+  if (!context.actionGrants.includes(action))
+    return { allowed: false, reason: 'ACTION_NOT_GRANTED' };
+  if (context.role === 'packet-recipient') {
+    return resource.packetId && context.packetGrants.includes(resource.packetId)
+      ? { allowed: true }
+      : { allowed: false, reason: 'PACKET_NOT_GRANTED' };
+  }
+  if (resource.category && !context.categoryGrants.includes(resource.category))
+    return { allowed: false, reason: 'CATEGORY_NOT_GRANTED' };
+  return { allowed: true };
+}
