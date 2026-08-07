@@ -50,3 +50,4 @@
 2026-08-06T21:57:41Z | codex | EP-005 | NODE_DONE | verify: ok; production-built accessible overview guided onboarding shared UI contract and browser checks audited
 2026-08-06T21:57:55Z | codex | EP-006 | LEASE | scheduler NEXT EP-006; audit and harden auth permissions AI boundary and security tests
 2026-08-07T22:26:57Z | codex | EP-006 | MILESTONE_PASS | M1 verify: ok; deny-by-default authz step-up packet isolation JIT support access and quarantined upload gates verified
+2026-08-07T22:28:17Z | codex | EP-006 | MILESTONE_PASS | M2 verify: ok; security matrices and real-service behavior reverified from committed checkpoint
