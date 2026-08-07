@@ -23,6 +23,8 @@ jobs:
         run: docker compose up -d --wait
       - name: Install locked dependencies
         run: sh scripts/install.sh
+      - name: Install browser runtime
+        run: pnpm exec playwright install chromium
       - name: Apply migrations
         run: pnpm db:migrate
       - name: Verify

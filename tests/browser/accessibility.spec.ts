@@ -21,6 +21,7 @@ test('home is keyboard-operable and has no serious WCAG violations', async ({ pa
 test('home remains usable at 200 percent zoom and reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Continue my plan' })).toBeVisible();
   await page.evaluate(() => {
     document.documentElement.style.zoom = '2';
   });

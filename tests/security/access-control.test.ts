@@ -44,6 +44,25 @@ describe('deny-by-default authorization', () => {
     expect(decision).toEqual({ allowed: false, reason: 'STEP_UP_REQUIRED' });
   });
 
+  it('permits an owner only after strong assurance for a sensitive action', () => {
+    expect(
+      authorize(
+        {
+          tenantId,
+          householdId,
+          role: 'owner',
+          assurance: 'passkey',
+          actionGrants: [],
+          categoryGrants: [],
+          packetGrants: [],
+          purpose: 'manage-emergency-policy',
+        },
+        'arm-emergency-policy',
+        { tenantId, householdId },
+      ),
+    ).toEqual({ allowed: true });
+  });
+
   it('keeps recipients packet-specific and non-enumerating', () => {
     const context = {
       tenantId,
@@ -84,6 +103,25 @@ describe('deny-by-default authorization', () => {
     );
     expect(decision).toEqual({ allowed: false, reason: 'SUPPORT_APPROVAL_REQUIRED' });
   });
+
+  it('expires helper and support grants without a grace bypass', () => {
+    const decision = authorize(
+      {
+        tenantId,
+        householdId,
+        role: 'trusted-helper',
+        assurance: 'mfa',
+        actionGrants: ['read'],
+        categoryGrants: ['pets'],
+        packetGrants: [],
+        purpose: 'continuity help',
+        expiresAt: new Date(0),
+      },
+      'read',
+      { tenantId, householdId, category: 'pets' },
+    );
+    expect(decision).toEqual({ allowed: false, reason: 'GRANT_EXPIRED' });
+  });
 });
 
 describe('quarantined upload boundary', () => {
@@ -108,5 +146,22 @@ describe('quarantined upload boundary', () => {
     expect(() =>
       validateQuarantinedUpload({ ...upload, malwareStatus: 'pending' }, policy),
     ).toThrow('UPLOAD_NOT_MALWARE_CLEARED');
+  });
+
+  it('rejects executable signatures and declared-type mismatches in quarantine', () => {
+    const executable = Buffer.from('4d5a900003000000', 'hex');
+    expect(() =>
+      validateQuarantinedUpload(
+        {
+          ...upload,
+          bytes: executable,
+          checksumSha256: createHash('sha256').update(executable).digest('hex'),
+        },
+        policy,
+      ),
+    ).toThrow('UPLOAD_EXECUTABLE_REJECTED');
+    expect(() =>
+      validateQuarantinedUpload({ ...upload, filename: 'instructions.jpg' }, policy),
+    ).toThrow('UPLOAD_TYPE_REJECTED');
   });
 });

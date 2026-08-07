@@ -53,3 +53,5 @@
 2026-08-07T22:28:17Z | codex | EP-006 | MILESTONE_PASS | M2 verify: ok; security matrices and real-service behavior reverified from committed checkpoint
 2026-08-07T22:29:57Z | codex | EP-006 | MILESTONE_PASS | M3 verify: ok; expected-files and clean-scope audit passed
 2026-08-07T22:29:57Z | codex | EP-006 | NODE_DONE | verify: ok; auth step-up tenant packet support upload DLP AI and emergency defenses audited
+2026-08-07T22:30:16Z | codex | EP-007 | LEASE | scheduler NEXT EP-007; expand verification to browser backup restore and deployment-relevant drills
+2026-08-07T22:35:36Z | codex | EP-007 | MILESTONE_PASS | M1 verify: ok; 24 unit-security tests browser accessibility fourteen live-fire proofs backup and restore passed

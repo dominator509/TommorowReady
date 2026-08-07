@@ -12,5 +12,13 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 60_000,
   },
-  projects: [{ name: 'chrome', use: { browserName: 'chromium', channel: 'chrome' } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        browserName: 'chromium',
+        ...(process.env.GITHUB_ACTIONS ? {} : { channel: 'chrome' as const }),
+      },
+    },
+  ],
 });
