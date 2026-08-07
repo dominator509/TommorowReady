@@ -67,3 +67,4 @@
 2026-08-07T22:53:16Z | codex | EP-009 | LEASE | scheduler NEXT EP-009; validate immutable images deployment rollback migration and local rehearsal artifacts
 2026-08-07T23:06:02Z | codex | EP-009 | MILESTONE_FAIL | M1 container rehearsal exit 1 signature WEB_STARTUP_EMPTY_REPLY hypothesis web readiness used one immediate curl while API used bounded polling; apply same bounded readiness loop to both images
 2026-08-07T23:08:23Z | codex | EP-009 | MILESTONE_PASS | M1 verify: ok; stable immutable non-root images bounded container rehearsal deployment baseline and rollback evidence passed
+2026-08-07T23:10:13Z | codex | EP-009 | MILESTONE_PASS | M2 verify: ok and container rehearsal: ok; immutable image startup and real dependency readiness reverified
