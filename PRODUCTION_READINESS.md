@@ -48,3 +48,16 @@ Production is permitted only when every item below has a current evidence comman
 - `AUTO_DEPLOY_AUTHORIZED` remains `no` until the operator explicitly changes it after all gates.
 
 The ship gate is: clean state -> `sh scripts/verify.sh` -> `sh scripts/production-readiness-check.sh` -> release tag -> exact MANUAL deploy command -> `RUN_COMPLETE`. No lesser state is production ready.
+
+## Current evidence — 2026-08-07
+
+| Gate | Current evidence | Status |
+|---|---|---|
+| Complete local verification | `verify: ok`; 27 unit/security, 8 integration/contract, 3 API/performance E2E, 3 browser accessibility tests | Passed locally |
+| Core outcomes | LF-01 through LF-14 each emitted `ok`; aggregate `live-fire: ok` | Passed against real local dependencies |
+| Backup and restore | `backup: ok`; `restore drill: ok` against an isolated PostgreSQL database | Passed locally |
+| Container release rehearsal | `container rehearsal: ok` on repeated runs; API and web ran non-root and API queried real PostgreSQL | Passed locally |
+| Immutable local images | API `a02406d473db...`; web `40379c2e3ab5...`; worker `9f9385ee3e48...` match the rehearsal manifest | Passed locally |
+| Production ship gate | `production readiness: FAIL - legal approval evidence missing` after a complete green verification | Blocked externally |
+
+No production release tag exists. `green/EP-009` is the latest genuine graph checkpoint. The externally dependent items are consolidated in `.agent/state/DEFERRED_EXTERNALS.md` and `REMOTE_SESSION_HANDOFF.md`.

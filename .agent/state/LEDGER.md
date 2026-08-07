@@ -70,3 +70,6 @@
 2026-08-07T23:10:13Z | codex | EP-009 | MILESTONE_PASS | M2 verify: ok and container rehearsal: ok; immutable image startup and real dependency readiness reverified
 2026-08-07T23:12:18Z | codex | EP-009 | MILESTONE_PASS | M3 verify: ok and container rehearsal: ok; expected-files clean-scope and digest-manifest equality audit passed
 2026-08-07T23:12:18Z | codex | EP-009 | NODE_DONE | verify: ok; immutable images local deployment rehearsal migration backup rollback and fail-closed manual production boundary audited
+2026-08-07T23:12:38Z | codex | EP-010 | LEASE | scheduler NEXT EP-010; run final local gates and produce maximum-engineering-complete external handoff without claiming ship approval
+2026-08-07T23:16:51Z | codex | EP-010 | EXTERNAL_DEFERRED | production readiness exit 1 after verify: ok; exact blocker legal approval evidence missing; insurance authorization KMS vendor platform DNS and production probes remain deferred
+2026-08-07T23:20:23Z | codex | EP-010 | MILESTONE_PASS | M1 verify: ok; release status production evidence matrix and exact external handoff authored
