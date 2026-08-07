@@ -68,3 +68,5 @@
 2026-08-07T23:06:02Z | codex | EP-009 | MILESTONE_FAIL | M1 container rehearsal exit 1 signature WEB_STARTUP_EMPTY_REPLY hypothesis web readiness used one immediate curl while API used bounded polling; apply same bounded readiness loop to both images
 2026-08-07T23:08:23Z | codex | EP-009 | MILESTONE_PASS | M1 verify: ok; stable immutable non-root images bounded container rehearsal deployment baseline and rollback evidence passed
 2026-08-07T23:10:13Z | codex | EP-009 | MILESTONE_PASS | M2 verify: ok and container rehearsal: ok; immutable image startup and real dependency readiness reverified
+2026-08-07T23:12:18Z | codex | EP-009 | MILESTONE_PASS | M3 verify: ok and container rehearsal: ok; expected-files clean-scope and digest-manifest equality audit passed
+2026-08-07T23:12:18Z | codex | EP-009 | NODE_DONE | verify: ok; immutable images local deployment rehearsal migration backup rollback and fail-closed manual production boundary audited

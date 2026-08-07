@@ -75,13 +75,21 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 # 11. Progress
 - [x] M1 complete with evidence and commit.
 - [x] M2 complete with evidence and commit.
-- [ ] M3 complete with evidence and commit.
+- [x] M3 complete with evidence and commit.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
+
+- 2026-08-07: The API originally bound loopback inside its container, so a published port could not serve traffic. The runtime now accepts `HOST`, and the image fixes it to `0.0.0.0` while local source startup remains loopback by default.
+- 2026-08-07: A one-shot web probe exposed a real startup race. Both web and API now use bounded readiness loops, and two consecutive rehearsals passed.
+- 2026-08-07: BuildKit local provenance makes manifest-list digests vary independently of cached application layers. Local rehearsal disables that nondeterministic attestation; production provenance remains mandatory at the registry boundary.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.
 
 # 14. Outcomes & Retrospective
 Complete after verification with files, commands, sentinels, risks, and follow-up.
+
+- Delivered stable non-root API, web, and worker images; container health checks; services, probes, resource/security constraints, immutable local digests, release-rehearsal CI, and bounded local startup/readiness proof.
+- Final local digests exactly match the Kubernetes rehearsal manifest: API `a02406d473db...`, web `40379c2e3ab5...`, worker `9f9385ee3e48...`.
+- Three milestone passes emitted `verify: ok`; the last two also emitted `container rehearsal: ok`. Production registry, provider overlay, DNS/TLS/WAF, secret manager, KMS, external probes, staging rollback, and deploy authorization remain deferred.
