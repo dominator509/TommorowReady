@@ -93,3 +93,5 @@
 2026-08-08T04:47:59Z | codex | EP-010 | COMMAND_FAIL | backup restore regression exit 1 signature CONTAINER_LOCALHOST_25432_REFUSED hypothesis host-mapped DATABASE_MIGRATION_URL is invalid inside database container; use container POSTGRES_USER POSTGRES_DB over Unix socket
 2026-08-08T04:48:00Z | codex | EP-010 | DIAGNOSTIC_FAIL | compose contract search exit 1 signature OPTIONAL_COMPOSE_FILES_MISSING; docker-compose.yml confirmed internal port 5432 and service environment while alternate filenames are absent
 2026-08-08T04:50:59Z | codex | EP-010 | RECOVERY_PASS | GitHub CI portability repair verified locally: Node 24.14.1 workflow pin, container-native PostgreSQL 17 backup and restore, verify: ok
+2026-08-08T04:55:03Z | codex | EP-010 | HOSTED_CI_PASS | GitHub Actions run 31240404134 completed successfully in 1m54s at ee0cfa61; all verify and teardown steps passed
+2026-08-08T04:55:03Z | codex | EP-010 | HARDENING | hosted CI reported checkout Node 20 deprecation annotation; update actions/checkout to official immutable v7.0.1 SHA and rerun
