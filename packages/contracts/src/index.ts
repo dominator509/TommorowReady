@@ -1,11 +1,29 @@
 import { z } from 'zod';
 
-export const contextHeaders = z.object({
-  'x-tenant-id': z.string().uuid(),
-  'x-household-id': z.string().uuid().optional(),
-  'x-actor-id': z.string().uuid(),
-  'x-purpose': z.string().min(3).max(120),
-});
+export const sessionClaims = z
+  .object({
+    sub: z.string().uuid(),
+    tenantId: z.string().uuid(),
+    householdId: z.string().uuid().optional(),
+    role: z.enum([
+      'owner',
+      'co-owner',
+      'trusted-helper',
+      'packet-recipient',
+      'professional-viewer',
+      'support-agent',
+      'platform-administrator',
+    ]),
+    assurance: z.enum(['password', 'mfa', 'passkey']),
+    actionGrants: z.array(z.string().min(1).max(120)).max(200),
+    categoryGrants: z.array(z.string().min(1).max(120)).max(200),
+    packetGrants: z.array(z.string().uuid()).max(500),
+    purpose: z.string().trim().min(3).max(120),
+    exp: z.number().int().positive(),
+    customerApproved: z.boolean().optional(),
+    reason: z.string().trim().min(3).max(500).optional(),
+  })
+  .strict();
 export const householdInput = z.object({ name: z.string().trim().min(1).max(120) });
 export const recordInput = z.object({
   kind: z.string().min(1).max(80),

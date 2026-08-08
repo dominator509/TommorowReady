@@ -5,6 +5,7 @@ import {
   migrateDatabase,
   PostgresContinuityRepository,
 } from '../../packages/infrastructure/database/src/index.js';
+import { sessionHeaders } from '../helpers/auth.js';
 
 try {
   loadEnvFile('.env');
@@ -17,11 +18,8 @@ describe('real API end to end', () => {
   it('creates a household and rejects secret-bearing records', async () => {
     const repository = new PostgresContinuityRepository(databaseUrl);
     const app = createApp(repository);
-    const headers = {
-      'x-tenant-id': crypto.randomUUID(),
-      'x-actor-id': crypto.randomUUID(),
-      'x-purpose': 'one afternoon plan',
-    };
+    const tenantId = crypto.randomUUID();
+    const headers = sessionHeaders({ tenantId, purpose: 'one afternoon plan' });
     const household = await app.inject({
       method: 'POST',
       url: '/v1/households',
@@ -33,7 +31,7 @@ describe('real API end to end', () => {
     const rejected = await app.inject({
       method: 'POST',
       url: '/v1/records',
-      headers: { ...headers, 'x-household-id': householdId },
+      headers: sessionHeaders({ tenantId, householdId, purpose: 'one afternoon plan' }),
       payload: { kind: 'account', payload: { locator: 'password: do-not-store-this' } },
     });
     expect(rejected.statusCode).toBe(422);
@@ -47,12 +45,11 @@ describe('real API end to end', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/v1/releases/VERIFYING/transition',
-      headers: {
-        'x-tenant-id': crypto.randomUUID(),
-        'x-household-id': crypto.randomUUID(),
-        'x-actor-id': crypto.randomUUID(),
-        'x-purpose': 'release verification',
-      },
+      headers: sessionHeaders({
+        tenantId: crypto.randomUUID(),
+        householdId: crypto.randomUUID(),
+        purpose: 'release verification',
+      }),
       payload: {
         next: 'MANUAL_REVIEW_REQUIRED',
         context: {
@@ -69,6 +66,37 @@ describe('real API end to end', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().state).toBe('MANUAL_REVIEW_REQUIRED');
+    await app.close();
+    await repository.close();
+  });
+  it('never approves a release from caller-asserted evidence', async () => {
+    const repository = new PostgresContinuityRepository(databaseUrl);
+    const app = createApp(repository);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/releases/CHALLENGE_ACTIVE/transition',
+      headers: sessionHeaders({
+        tenantId: crypto.randomUUID(),
+        householdId: crypto.randomUUID(),
+        assurance: 'mfa',
+        purpose: 'attempt release approval',
+      }),
+      payload: {
+        next: 'APPROVED_FOR_RELEASE',
+        context: {
+          recipientVerified: true,
+          packetScopeMatches: true,
+          challengeEndsAt: new Date(0).toISOString(),
+          now: new Date(0).toISOString(),
+          ownerDenied: false,
+          takeoverSignal: false,
+          verificationSatisfied: true,
+          providerAmbiguous: false,
+        },
+      },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe('SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED');
     await app.close();
     await repository.close();
   });

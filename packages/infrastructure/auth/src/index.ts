@@ -60,11 +60,15 @@ export function verifySession(
     !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
   )
     return null;
-  const value = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as Record<
-    string,
-    unknown
-  >;
-  return typeof value.exp === 'number' && value.exp > now.getTime() ? value : null;
+  try {
+    const value = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    return typeof value.exp === 'number' && value.exp > now.getTime() ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 export type SensitiveAction =
@@ -93,7 +97,14 @@ export function requiresStepUp(action: string): action is SensitiveAction {
 export type AuthorizationContext = Readonly<{
   tenantId: string;
   householdId: string;
-  role: 'owner' | 'trusted-helper' | 'packet-recipient' | 'support';
+  role:
+    | 'owner'
+    | 'co-owner'
+    | 'trusted-helper'
+    | 'packet-recipient'
+    | 'professional-viewer'
+    | 'support-agent'
+    | 'platform-administrator';
   assurance: SessionAssurance;
   actionGrants: readonly string[];
   categoryGrants: readonly string[];
@@ -137,10 +148,13 @@ export function authorize(
     return { allowed: false, reason: 'HOUSEHOLD_MISMATCH' };
   if (requiresStepUp(action) && context.assurance === 'password')
     return { allowed: false, reason: 'STEP_UP_REQUIRED' };
-  if (context.role === 'owner') return { allowed: true };
+  if (context.role === 'owner' || context.role === 'co-owner') return { allowed: true };
   if (!context.expiresAt || context.expiresAt <= now)
     return { allowed: false, reason: 'GRANT_EXPIRED' };
-  if (context.role === 'support' && (!context.customerApproved || !context.reason?.trim()))
+  if (
+    (context.role === 'support-agent' || context.role === 'platform-administrator') &&
+    (!context.customerApproved || !context.reason?.trim())
+  )
     return { allowed: false, reason: 'SUPPORT_APPROVAL_REQUIRED' };
   if (!context.actionGrants.includes(action))
     return { allowed: false, reason: 'ACTION_NOT_GRANTED' };

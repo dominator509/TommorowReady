@@ -10,13 +10,13 @@ import {
   type RequestContext,
 } from '../../../packages/application/src/index.js';
 import {
-  contextHeaders,
   errorEnvelope,
   householdInput,
   packetInput,
   payloadInput,
   recordInput,
   releaseTransitionInput,
+  sessionClaims,
 } from '../../../packages/contracts/src/index.js';
 import {
   DomainError,
@@ -24,23 +24,71 @@ import {
   type ReleaseState,
 } from '../../../packages/domain/src/index.js';
 import { createPrivacySafeLogger } from '../../../packages/infrastructure/observability/src/index.js';
+import {
+  authorize,
+  verifySession,
+  type AuthorizationContext,
+} from '../../../packages/infrastructure/auth/src/index.js';
 
-function context(request: FastifyRequest): RequestContext {
-  const parsed = contextHeaders.safeParse(request.headers);
-  if (!parsed.success)
-    throw new DomainError(
-      'REQUEST_CONTEXT_REQUIRED',
-      'Tenant, actor, and purpose headers are required.',
-    );
+type AuthenticatedContext = RequestContext & Readonly<{ authorization: AuthorizationContext }>;
+
+function context(request: FastifyRequest, sessionSecret: string): AuthenticatedContext {
+  const authorization = request.headers.authorization;
+  if (!authorization?.startsWith('Bearer '))
+    throw new DomainError('AUTHENTICATION_REQUIRED', 'A valid authenticated session is required.');
+  const token = authorization.slice('Bearer '.length).trim();
+  const claims = sessionClaims.safeParse(verifySession(token, sessionSecret));
+  if (!claims.success)
+    throw new DomainError('AUTHENTICATION_REQUIRED', 'A valid authenticated session is required.');
+  const expiresAt = new Date(claims.data.exp);
   return {
-    tenantId: parsed.data['x-tenant-id'],
-    ...(parsed.data['x-household-id'] ? { householdId: parsed.data['x-household-id'] } : {}),
-    actorId: parsed.data['x-actor-id'],
-    purpose: parsed.data['x-purpose'],
+    tenantId: claims.data.tenantId,
+    ...(claims.data.householdId ? { householdId: claims.data.householdId } : {}),
+    actorId: claims.data.sub,
+    purpose: claims.data.purpose,
+    authorization: {
+      tenantId: claims.data.tenantId,
+      householdId: claims.data.householdId ?? '00000000-0000-0000-0000-000000000000',
+      role: claims.data.role,
+      assurance: claims.data.assurance,
+      actionGrants: claims.data.actionGrants,
+      categoryGrants: claims.data.categoryGrants,
+      packetGrants: claims.data.packetGrants,
+      purpose: claims.data.purpose,
+      expiresAt,
+      ...(claims.data.customerApproved === undefined
+        ? {}
+        : { customerApproved: claims.data.customerApproved }),
+      ...(claims.data.reason === undefined ? {} : { reason: claims.data.reason }),
+    },
   };
 }
 
-export function createApp(repository: ContinuityRepository): FastifyInstance {
+function requireHouseholdAuthorization(
+  authenticated: AuthenticatedContext,
+  action: string,
+  category?: string,
+  packetId?: string,
+): void {
+  if (!authenticated.householdId)
+    throw new DomainError('HOUSEHOLD_CONTEXT_REQUIRED', 'Household context is required.');
+  const decision = authorize(authenticated.authorization, action, {
+    tenantId: authenticated.tenantId,
+    householdId: authenticated.householdId,
+    ...(category ? { category } : {}),
+    ...(packetId ? { packetId } : {}),
+  });
+  if (!decision.allowed)
+    throw new DomainError('AUTHORIZATION_DENIED', 'The authenticated session is not authorized.');
+}
+
+export function createApp(
+  repository: ContinuityRepository,
+  options: Readonly<{ sessionSecret?: string }> = {},
+): FastifyInstance {
+  const sessionSecret = options.sessionSecret ?? process.env.SESSION_SECRET;
+  if (!sessionSecret || Buffer.byteLength(sessionSecret, 'utf8') < 32)
+    throw new Error('SESSION_SECRET_INVALID');
   const app = Fastify({
     loggerInstance: createPrivacySafeLogger(process.env.LOG_LEVEL ?? 'info') as FastifyBaseLogger,
     genReqId: () => randomUUID(),
@@ -59,11 +107,15 @@ export function createApp(repository: ContinuityRepository): FastifyInstance {
     const status =
       code === 'INTERNAL_ERROR'
         ? 500
-        : code === 'REQUEST_CONTEXT_REQUIRED'
+        : code === 'AUTHENTICATION_REQUIRED'
           ? 401
-          : code === 'PROHIBITED_SECRET'
-            ? 422
-            : 400;
+          : code === 'AUTHORIZATION_DENIED'
+            ? 403
+            : code === 'SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED'
+              ? 409
+              : code === 'PROHIBITED_SECRET'
+                ? 422
+                : 400;
     void reply
       .status(status)
       .send(
@@ -87,41 +139,62 @@ export function createApp(repository: ContinuityRepository): FastifyInstance {
   app.get('/v1/health/ready', readiness);
   app.post('/v1/households', async (request, reply) => {
     const input = householdInput.parse(request.body);
-    const record = await service.createRecord(context(request), 'household', input);
+    const authenticated = context(request, sessionSecret);
+    if (authenticated.authorization.role !== 'owner')
+      throw new DomainError('AUTHORIZATION_DENIED', 'The authenticated session is not authorized.');
+    const record = await service.createRecord(authenticated, 'household', input);
     return reply.status(201).send(record);
   });
   app.post('/v1/records', async (request, reply) => {
     const input = recordInput.parse(request.body);
-    const record = await service.createRecord(context(request), input.kind, input.payload);
+    const authenticated = context(request, sessionSecret);
+    requireHouseholdAuthorization(authenticated, `create:${input.kind}`, input.kind);
+    const record = await service.createRecord(authenticated, input.kind, input.payload);
     return reply.status(201).send(record);
   });
   app.get('/v1/records/:kind', async (request) => {
     const params = request.params as { kind: string };
-    return repository.list(context(request), params.kind);
+    const authenticated = context(request, sessionSecret);
+    requireHouseholdAuthorization(authenticated, `read:${params.kind}`, params.kind);
+    return repository.list(authenticated, params.kind);
   });
   app.post('/v1/packets', async (request, reply) => {
     const input = packetInput.parse(request.body);
-    const ctx = context(request);
+    const ctx = context(request, sessionSecret);
     if (!ctx.householdId)
       throw new DomainError('HOUSEHOLD_CONTEXT_REQUIRED', 'Household context is required.');
+    requireHouseholdAuthorization(ctx, 'create:packet', 'packet');
     const manifest = await service.createPacket({ ...ctx, householdId: ctx.householdId }, input);
     return reply.status(201).send(manifest);
   });
   app.post('/v1/releases/:state/transition', async (request) => {
     const input = releaseTransitionInput.parse(request.body);
     const params = request.params as { state: ReleaseState };
-    context(request);
+    const authenticated = context(request, sessionSecret);
+    requireHouseholdAuthorization(
+      authenticated,
+      input.next === 'APPROVED_FOR_RELEASE' || input.next === 'RELEASED'
+        ? 'approve-release'
+        : 'transition-release',
+      'release',
+    );
+    if (input.next === 'APPROVED_FOR_RELEASE' || input.next === 'RELEASED')
+      throw new DomainError(
+        'SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED',
+        'Release approval requires persisted server-verified policy evidence.',
+      );
     return {
       state: transitionRelease(params.state, input.next, {
         ...input.context,
         challengeEndsAt: new Date(input.context.challengeEndsAt),
-        now: new Date(input.context.now),
+        now: new Date(),
       }),
     };
   });
   app.post('/v1/privacy/requests', async (request, reply) => {
-    const ctx = context(request);
-    const input = request.body as Record<string, unknown>;
+    const ctx = context(request, sessionSecret);
+    requireHouseholdAuthorization(ctx, 'create:privacyRequest', 'privacyRequest');
+    const input = payloadInput.parse(request.body);
     const record = await service.createRecord(ctx, 'privacyRequest', {
       ...input,
       status: 'RECEIVED',
@@ -163,12 +236,28 @@ export function createApp(repository: ContinuityRepository): FastifyInstance {
     billing: 'subscription',
   } as const;
   for (const [route, kind] of Object.entries(resourceKinds)) {
-    app.post(`/v1/${route}`, async (request, reply) =>
-      reply
+    app.post(`/v1/${route}`, async (request, reply) => {
+      const authenticated = context(request, sessionSecret);
+      const action =
+        kind === 'emergencyPolicy'
+          ? 'arm-emergency-policy'
+          : kind === 'recipient'
+            ? 'change-release-recipient'
+            : kind === 'export'
+              ? 'export-full-archive'
+              : kind === 'helperGrant'
+                ? 'grant-restricted-category'
+                : `create:${kind}`;
+      requireHouseholdAuthorization(authenticated, action, kind);
+      return reply
         .status(201)
-        .send(await service.createRecord(context(request), kind, payloadInput.parse(request.body))),
-    );
-    app.get(`/v1/${route}`, async (request) => repository.list(context(request), kind));
+        .send(await service.createRecord(authenticated, kind, payloadInput.parse(request.body)));
+    });
+    app.get(`/v1/${route}`, async (request) => {
+      const authenticated = context(request, sessionSecret);
+      requireHouseholdAuthorization(authenticated, `read:${kind}`, kind);
+      return repository.list(authenticated, kind);
+    });
   }
   return app;
 }

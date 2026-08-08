@@ -88,7 +88,7 @@ describe('deny-by-default authorization', () => {
       {
         tenantId,
         householdId,
-        role: 'support',
+        role: 'support-agent',
         assurance: 'mfa',
         actionGrants: ['diagnose'],
         categoryGrants: ['metadata'],
