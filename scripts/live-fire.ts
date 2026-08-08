@@ -5,6 +5,7 @@ import {
   buildPacketManifest,
   calculateReadiness,
   canAccessPacket,
+  DomainError,
   transitionRelease,
 } from '../packages/domain/src/index.js';
 import {
@@ -39,6 +40,15 @@ const context: RequestContext & { householdId: string } = {
 };
 const create = (kind: string, payload: Record<string, unknown>) =>
   service.createRecord(context, kind, payload);
+const expectFailure = async (operation: () => Promise<unknown>, code: string): Promise<void> => {
+  try {
+    await operation();
+  } catch (error) {
+    if (error instanceof DomainError && error.code === code) return;
+    throw error;
+  }
+  throw new Error(`EXPECTED_FAILURE_MISSING:${code}`);
+};
 try {
   switch (proof) {
     case 'LF-01':
@@ -161,21 +171,64 @@ try {
       break;
     }
     case 'LF-09': {
-      const safe = {
+      await create('emergencyPolicy', { state: 'ARMED', challengeHours: 48 });
+      const recipientId = crypto.randomUUID();
+      const manifest = buildPacketManifest({
+        tenantId: context.tenantId,
+        householdId: context.householdId,
+        packetId: crypto.randomUUID(),
+        recipientId,
+        purpose: 'release policy rehearsal',
+        itemIds: [crypto.randomUUID()],
+        version: 1,
+      });
+      await repository.savePacket(context, manifest);
+      const request = await create('accessRequest', {
+        packetId: manifest.packetId,
+        recipientId,
+        purpose: manifest.purpose,
+        state: 'REQUESTED',
+      });
+      await repository.transitionReleaseRequest(
+        context,
+        request.id,
+        'VERIFYING',
+        crypto.randomUUID(),
+      );
+      await repository.recordReleaseEvidence(context, request.id, {
         recipientVerified: true,
         packetScopeMatches: true,
         verificationSatisfied: true,
-        ownerDenied: false,
-        takeoverSignal: false,
         providerAmbiguous: false,
-        challengeEndsAt: new Date(0),
-        now: new Date(),
-      };
-      let state = transitionRelease('ARMED', 'REQUESTED', safe);
-      state = transitionRelease(state, 'VERIFYING', safe);
-      state = transitionRelease(state, 'CHALLENGE_ACTIVE', safe);
-      state = transitionRelease(state, 'APPROVED_FOR_RELEASE', safe);
-      if (state !== 'APPROVED_FOR_RELEASE') throw new Error('POLICY_FLOW_FAILED');
+        providerReference: 'local-sandbox-release-policy',
+      });
+      await repository.recordReleaseChallenge(context, request.id, new Date(Date.now() + 60_000));
+      await repository.transitionReleaseRequest(
+        context,
+        request.id,
+        'CHALLENGE_ACTIVE',
+        crypto.randomUUID(),
+      );
+      await expectFailure(
+        () =>
+          repository.transitionReleaseRequest(
+            context,
+            request.id,
+            'APPROVED_FOR_RELEASE',
+            crypto.randomUUID(),
+          ),
+        'RELEASE_POLICY_UNSATISFIED',
+      );
+      await repository.recordReleaseChallenge(context, request.id, new Date(0));
+      if (
+        (await repository.transitionReleaseRequest(
+          context,
+          request.id,
+          'APPROVED_FOR_RELEASE',
+          crypto.randomUUID(),
+        )) !== 'APPROVED_FOR_RELEASE'
+      )
+        throw new Error('POLICY_FLOW_FAILED');
       break;
     }
     case 'LF-10': {
@@ -196,19 +249,46 @@ try {
         'TomorrowReady owner challenge',
         'A challenge is active. No packet content is included.',
       );
-      const safe = {
+      const request = await create('accessRequest', {
+        packetId: manifest.packetId,
+        recipientId,
+        purpose: manifest.purpose,
+        state: 'REQUESTED',
+      });
+      await repository.transitionReleaseRequest(
+        context,
+        request.id,
+        'VERIFYING',
+        crypto.randomUUID(),
+      );
+      await repository.recordReleaseEvidence(context, request.id, {
         recipientVerified: true,
         packetScopeMatches: true,
         verificationSatisfied: true,
-        ownerDenied: false,
-        takeoverSignal: false,
         providerAmbiguous: false,
-        challengeEndsAt: new Date(0),
-        now: new Date(),
-      };
-      if (transitionRelease('APPROVED_FOR_RELEASE', 'RELEASED', safe) !== 'RELEASED')
+        providerReference: 'local-sandbox-recipient-verification',
+      });
+      await repository.recordReleaseChallenge(context, request.id, new Date(0));
+      await repository.transitionReleaseRequest(
+        context,
+        request.id,
+        'CHALLENGE_ACTIVE',
+        crypto.randomUUID(),
+      );
+      await repository.transitionReleaseRequest(
+        context,
+        request.id,
+        'APPROVED_FOR_RELEASE',
+        crypto.randomUUID(),
+      );
+      const releaseKey = crypto.randomUUID();
+      if (
+        (await repository.transitionReleaseRequest(context, request.id, 'RELEASED', releaseKey)) !==
+          'RELEASED' ||
+        (await repository.transitionReleaseRequest(context, request.id, 'RELEASED', releaseKey)) !==
+          'RELEASED'
+      )
         throw new Error('RELEASE_FAILED');
-      await repository.appendAudit(context, 'release:one-packet', manifest.id, manifest.hash);
       break;
     }
     case 'LF-11': {

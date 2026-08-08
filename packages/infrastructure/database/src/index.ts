@@ -2,12 +2,18 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { Pool, type PoolClient } from 'pg';
+import type { VerifiedBillingEvent } from '../../billing/src/index.js';
 import type {
   ContinuityRepository,
   RequestContext,
   StoredRecord,
 } from '../../../application/src/index.js';
-import type { PacketManifest } from '../../../domain/src/index.js';
+import {
+  DomainError,
+  transitionRelease,
+  type PacketManifest,
+  type ReleaseState,
+} from '../../../domain/src/index.js';
 import {
   assertFieldEncryptionKey,
   decryptRestricted,
@@ -342,6 +348,344 @@ export class PostgresContinuityRepository implements ContinuityRepository {
     });
   }
 
+  async processBillingEvent(
+    event: VerifiedBillingEvent,
+  ): Promise<'processed' | 'duplicate' | 'stale'> {
+    const context: RequestContext = {
+      tenantId: event.tenantId,
+      householdId: event.householdId,
+      actorId: '00000000-0000-4000-8000-000000000000',
+      purpose: 'authenticated billing webhook',
+    };
+    const result = await this.transaction(context, async (client) => {
+      const inboxId = randomUUID();
+      const inboxPayload = encryptPayload(
+        'inbox_events',
+        inboxId,
+        event.tenantId,
+        event.householdId,
+        { eventId: event.eventId, type: event.type, created: event.created },
+        this.fieldEncryptionKey,
+        { idempotencyKey: `stripe:${event.eventId}` },
+      );
+      const accepted = await client.query(
+        'INSERT INTO inbox_events (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING id',
+        [inboxId, event.tenantId, event.householdId, inboxPayload],
+      );
+      if (accepted.rowCount === 0) return 'duplicate' as const;
+      const existing = await client.query<{
+        id: string;
+        tenant_id: string;
+        household_id: string | null;
+        payload: Record<string, unknown>;
+      }>(
+        "SELECT id, tenant_id, household_id, payload FROM subscriptions WHERE tenant_id=$1 AND payload->>'providerSubscriptionId'=$2 FOR UPDATE",
+        [event.tenantId, event.providerSubscriptionId],
+      );
+      const row = existing.rows[0];
+      if (row && Number(row.payload.providerEventCreated ?? -1) > event.created)
+        return 'stale' as const;
+      const id = row?.id ?? randomUUID();
+      const payload = encryptPayload(
+        'subscriptions',
+        id,
+        event.tenantId,
+        event.householdId,
+        {
+          providerCustomerId: event.providerCustomerId,
+          status: event.status,
+          lastEventType: event.type,
+        },
+        this.fieldEncryptionKey,
+        {
+          providerSubscriptionId: event.providerSubscriptionId,
+          providerEventCreated: String(event.created),
+        },
+      );
+      if (row)
+        await client.query(
+          'UPDATE subscriptions SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+          [payload, id],
+        );
+      else
+        await client.query(
+          'INSERT INTO subscriptions (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+          [id, event.tenantId, event.householdId, payload],
+        );
+      return 'processed' as const;
+    });
+    if (result !== 'duplicate')
+      await this.appendAudit(
+        context,
+        `billing:${result}`,
+        event.providerSubscriptionId,
+        createHash('sha256').update(event.eventId).digest('hex'),
+      );
+    return result;
+  }
+
+  async recordReleaseEvidence(
+    context: RequestContext & { householdId: string },
+    accessRequestId: string,
+    evidence: Readonly<{
+      recipientVerified: boolean;
+      packetScopeMatches: boolean;
+      verificationSatisfied: boolean;
+      providerAmbiguous: boolean;
+      providerReference: string;
+    }>,
+  ): Promise<void> {
+    const id = randomUUID();
+    await this.transaction(context, async (client) => {
+      const request = await client.query('SELECT 1 FROM access_requests WHERE id=$1', [
+        accessRequestId,
+      ]);
+      if (request.rowCount !== 1)
+        throw new DomainError('ACCESS_REQUEST_NOT_FOUND', 'Access request not found.');
+      const payload = encryptPayload(
+        'verification_evidence',
+        id,
+        context.tenantId,
+        context.householdId,
+        evidence,
+        this.fieldEncryptionKey,
+        { accessRequestId },
+      );
+      await client.query(
+        'INSERT INTO verification_evidence (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+        [id, context.tenantId, context.householdId, payload],
+      );
+    });
+    await this.appendAudit(
+      context,
+      'release:verification-evidence',
+      accessRequestId,
+      createHash('sha256').update(evidence.providerReference).digest('hex'),
+    );
+  }
+
+  async recordReleaseChallenge(
+    context: RequestContext & { householdId: string },
+    accessRequestId: string,
+    endsAt: Date,
+  ): Promise<void> {
+    if (!Number.isFinite(endsAt.getTime())) throw new Error('CHALLENGE_END_INVALID');
+    const id = randomUUID();
+    await this.transaction(context, async (client) => {
+      const payload = encryptPayload(
+        'challenges',
+        id,
+        context.tenantId,
+        context.householdId,
+        { accessRequestId, endsAt: endsAt.toISOString() },
+        this.fieldEncryptionKey,
+        { accessRequestId },
+      );
+      await client.query(
+        'INSERT INTO challenges (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+        [id, context.tenantId, context.householdId, payload],
+      );
+    });
+    await this.appendAudit(
+      context,
+      'release:challenge-recorded',
+      accessRequestId,
+      createHash('sha256').update(endsAt.toISOString()).digest('hex'),
+    );
+  }
+
+  async transitionReleaseRequest(
+    context: RequestContext & { householdId: string },
+    accessRequestId: string,
+    next: ReleaseState,
+    idempotencyKey: string,
+  ): Promise<ReleaseState> {
+    const result = await this.transaction(context, async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `release:${context.tenantId}:${accessRequestId}`,
+      ]);
+      const requestResult = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM access_requests WHERE id=$1 FOR UPDATE',
+        [accessRequestId],
+      );
+      const row = requestResult.rows[0];
+      if (!row) throw new DomainError('ACCESS_REQUEST_NOT_FOUND', 'Access request not found.');
+      const requestPayload = decryptPayload('access_requests', row, this.fieldEncryptionKey);
+      const current = requestPayload.state as ReleaseState;
+      if (!current) throw new Error('ACCESS_REQUEST_STATE_INVALID');
+      const inputHash = createHash('sha256')
+        .update(JSON.stringify({ accessRequestId, next }))
+        .digest('hex');
+      const inboxId = randomUUID();
+      const inboxPayload = encryptPayload(
+        'inbox_events',
+        inboxId,
+        context.tenantId,
+        context.householdId,
+        { accessRequestId, next },
+        this.fieldEncryptionKey,
+        { idempotencyKey: `release:${idempotencyKey}`, inputHash },
+      );
+      const inserted = await client.query(
+        'INSERT INTO inbox_events (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING id',
+        [inboxId, context.tenantId, context.householdId, inboxPayload],
+      );
+      if (inserted.rowCount === 0) {
+        const prior = await client.query(
+          "SELECT payload->>'inputHash' AS input_hash FROM inbox_events WHERE payload->>'idempotencyKey'=$1",
+          [`release:${idempotencyKey}`],
+        );
+        if (prior.rows[0]?.input_hash !== inputHash)
+          throw new DomainError(
+            'IDEMPOTENCY_KEY_REUSED',
+            'Idempotency key was reused for different input.',
+          );
+        return { state: current, changed: false } as const;
+      }
+      const evidenceResult = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM verification_evidence WHERE payload->>'accessRequestId'=$1 ORDER BY created_at DESC LIMIT 1",
+        [accessRequestId],
+      );
+      const evidenceRow = evidenceResult.rows[0];
+      const evidence = evidenceRow
+        ? decryptPayload('verification_evidence', evidenceRow, this.fieldEncryptionKey)
+        : {};
+      const challengeResult = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM challenges WHERE payload->>'accessRequestId'=$1 ORDER BY created_at DESC LIMIT 1",
+        [accessRequestId],
+      );
+      const challenge = challengeResult.rows[0]
+        ? decryptPayload('challenges', challengeResult.rows[0], this.fieldEncryptionKey)
+        : {};
+      const denial = await client.query(
+        "SELECT 1 FROM denials WHERE payload->>'accessRequestId'=$1 LIMIT 1",
+        [accessRequestId],
+      );
+      const state = transitionRelease(current, next, {
+        recipientVerified: evidence.recipientVerified === true,
+        packetScopeMatches: evidence.packetScopeMatches === true,
+        verificationSatisfied: evidence.verificationSatisfied === true,
+        providerAmbiguous: evidence.providerAmbiguous === true,
+        ownerDenied: denial.rowCount === 1,
+        takeoverSignal: evidence.takeoverSignal === true,
+        challengeEndsAt:
+          typeof challenge.endsAt === 'string'
+            ? new Date(challenge.endsAt)
+            : new Date(8_640_000_000_000_000),
+        now: new Date(),
+      });
+      let manifest:
+        Readonly<{ id: string; hash: string; packetId: string; recipientId: string }> | undefined;
+      if (state === 'APPROVED_FOR_RELEASE' || state === 'RELEASED') {
+        const manifests = await client.query(
+          'SELECT id, tenant_id, household_id, payload FROM packet_manifests WHERE household_id=$1',
+          [context.householdId],
+        );
+        for (const manifestRow of manifests.rows) {
+          const candidate = decryptPayload(
+            'packet_manifests',
+            manifestRow,
+            this.fieldEncryptionKey,
+          );
+          if (
+            candidate.packetId === requestPayload.packetId &&
+            candidate.recipientId === requestPayload.recipientId &&
+            typeof candidate.hash === 'string'
+          ) {
+            manifest = {
+              id: manifestRow.id,
+              hash: candidate.hash,
+              packetId: candidate.packetId as string,
+              recipientId: candidate.recipientId as string,
+            };
+            break;
+          }
+        }
+        if (!manifest)
+          throw new DomainError(
+            'PACKET_MANIFEST_NOT_FOUND',
+            'An approved scoped packet manifest is required.',
+          );
+      }
+      const updatedPayload = encryptPayload(
+        'access_requests',
+        accessRequestId,
+        context.tenantId,
+        context.householdId,
+        { ...requestPayload, state },
+        this.fieldEncryptionKey,
+      );
+      await client.query(
+        'UPDATE access_requests SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [updatedPayload, accessRequestId],
+      );
+      if (state === 'APPROVED_FOR_RELEASE') {
+        const authorizationId = randomUUID();
+        const authorization = encryptPayload(
+          'release_authorizations',
+          authorizationId,
+          context.tenantId,
+          context.householdId,
+          {
+            accessRequestId,
+            evidenceId: evidenceRow.id,
+            manifestId: manifest!.id,
+            manifestHash: manifest!.hash,
+            approvedAt: new Date().toISOString(),
+          },
+          this.fieldEncryptionKey,
+          { accessRequestId },
+        );
+        await client.query(
+          'INSERT INTO release_authorizations (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+          [authorizationId, context.tenantId, context.householdId, authorization],
+        );
+      }
+      if (state === 'RELEASED') {
+        const authorization = await client.query(
+          "SELECT id FROM release_authorizations WHERE payload->>'accessRequestId'=$1 ORDER BY created_at DESC LIMIT 1",
+          [accessRequestId],
+        );
+        const authorizationId = authorization.rows[0]?.id as string | undefined;
+        if (!authorizationId)
+          throw new DomainError(
+            'RELEASE_AUTHORIZATION_REQUIRED',
+            'Release authorization is required.',
+          );
+        const releasedId = randomUUID();
+        const released = encryptPayload(
+          'released_packets',
+          releasedId,
+          context.tenantId,
+          context.householdId,
+          {
+            accessRequestId,
+            authorizationId,
+            manifestId: manifest!.id,
+            manifestHash: manifest!.hash,
+            recipientId: manifest!.recipientId,
+            releasedAt: new Date().toISOString(),
+          },
+          this.fieldEncryptionKey,
+          { accessRequestId },
+        );
+        await client.query(
+          'INSERT INTO released_packets (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+          [releasedId, context.tenantId, context.householdId, released],
+        );
+      }
+      return { state, changed: true } as const;
+    });
+    if (result.changed)
+      await this.appendAudit(
+        context,
+        `release:${result.state.toLowerCase()}`,
+        accessRequestId,
+        createHash('sha256').update(`${idempotencyKey}:${result.state}`).digest('hex'),
+      );
+    return result.state;
+  }
+
   private emailLookup(tenantId: string, email: string): string {
     return createHmac('sha256', this.authLookupSecret)
       .update(`${tenantId}:${email.trim().toLowerCase()}`)
@@ -535,7 +879,13 @@ export async function migrateDatabase(
     else await pool.query(`ALTER ROLE tomorrowready_app PASSWORD '${appPassword}'`);
     const migrationPaths =
       path === 'migrations/001_initial.sql'
-        ? [path, 'migrations/002_security_hardening.sql', 'migrations/003_auth_lookup.sql']
+        ? [
+            path,
+            'migrations/002_security_hardening.sql',
+            'migrations/003_auth_lookup.sql',
+            'migrations/004_billing_idempotency.sql',
+            'migrations/005_release_idempotency.sql',
+          ]
         : [path];
     await pool.query('CREATE SCHEMA IF NOT EXISTS app');
     await pool.query(

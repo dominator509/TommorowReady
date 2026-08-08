@@ -1,7 +1,10 @@
 import { loadEnvFile } from 'node:process';
 import { createApp } from './app.js';
 import { PostgresContinuityRepository } from '../../../packages/infrastructure/database/src/index.js';
-import { RedisAuthRateLimiter } from '../../../packages/infrastructure/database/src/services.js';
+import {
+  RedisAuthRateLimiter,
+  RedisSessionRevocationStore,
+} from '../../../packages/infrastructure/database/src/services.js';
 
 try {
   loadEnvFile('.env');
@@ -12,10 +15,18 @@ if (!databaseUrl) throw new Error('DATABASE_URL_REQUIRED');
 if (!redisUrl) throw new Error('REDIS_URL_REQUIRED');
 const repository = new PostgresContinuityRepository(databaseUrl);
 const authRateLimiter = new RedisAuthRateLimiter(redisUrl);
-const app = createApp(repository, { authRateLimiter });
+const sessionRevocationStore = new RedisSessionRevocationStore(redisUrl);
+const app = createApp(repository, {
+  authRateLimiter,
+  sessionRevocationStore,
+  ...(process.env.STRIPE_WEBHOOK_SECRET
+    ? { stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET }
+    : {}),
+});
 const close = async () => {
   await app.close();
   await authRateLimiter.close();
+  await sessionRevocationStore.close();
   await repository.close();
 };
 process.on('SIGINT', () => {

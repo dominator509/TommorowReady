@@ -50,31 +50,30 @@ export const packetInput = z.object({
   recipientId: z.string().uuid(),
   itemIds: z.array(z.string().uuid()).min(1).max(500),
 });
-export const releaseTransitionInput = z.object({
-  next: z.enum([
-    'DRAFT',
-    'ARMED',
-    'REQUESTED',
-    'VERIFYING',
-    'CHALLENGE_ACTIVE',
-    'APPROVED_FOR_RELEASE',
-    'RELEASED',
-    'DENIED',
-    'EXPIRED',
-    'CANCELLED',
-    'MANUAL_REVIEW_REQUIRED',
-  ]),
-  context: z.object({
-    recipientVerified: z.boolean(),
-    packetScopeMatches: z.boolean(),
-    challengeEndsAt: z.iso.datetime(),
-    now: z.iso.datetime(),
-    ownerDenied: z.boolean(),
-    takeoverSignal: z.boolean(),
-    verificationSatisfied: z.boolean(),
-    providerAmbiguous: z.boolean(),
-  }),
-});
+export const accessRequestInput = z
+  .object({
+    packetId: z.string().uuid(),
+    recipientId: z.string().uuid(),
+    purpose: z.string().trim().min(3).max(200),
+  })
+  .strict();
+export const releaseTransitionInput = z
+  .object({
+    next: z.enum([
+      'DRAFT',
+      'ARMED',
+      'REQUESTED',
+      'VERIFYING',
+      'CHALLENGE_ACTIVE',
+      'APPROVED_FOR_RELEASE',
+      'RELEASED',
+      'DENIED',
+      'EXPIRED',
+      'CANCELLED',
+      'MANUAL_REVIEW_REQUIRED',
+    ]),
+  })
+  .strict();
 export type ErrorEnvelope = Readonly<{
   code: string;
   message: string;

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { loadEnvFile } from 'node:process';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../apps/api/src/app.js';
@@ -5,7 +6,10 @@ import {
   migrateDatabase,
   PostgresContinuityRepository,
 } from '../../packages/infrastructure/database/src/index.js';
-import { RedisAuthRateLimiter } from '../../packages/infrastructure/database/src/services.js';
+import {
+  RedisAuthRateLimiter,
+  RedisSessionRevocationStore,
+} from '../../packages/infrastructure/database/src/services.js';
 import { hashPassword, totp } from '../../packages/infrastructure/auth/src/index.js';
 import { sessionHeaders } from '../helpers/auth.js';
 
@@ -94,6 +98,7 @@ describe('versioned API contracts', () => {
   it('issues password and TOTP-assured sessions with real encrypted identity lookup and rate limiting', async () => {
     const repository = new PostgresContinuityRepository(process.env.DATABASE_URL!);
     const limiter = new RedisAuthRateLimiter(process.env.REDIS_URL!, 2, 60);
+    const revocations = new RedisSessionRevocationStore(process.env.REDIS_URL!);
     const password = 'a strong local authentication password';
     const totpSecret = Buffer.from(crypto.getRandomValues(new Uint8Array(20)));
     const owner = await repository.bootstrapOwner({
@@ -102,7 +107,10 @@ describe('versioned API contracts', () => {
       householdName: 'Authentication Proof Household',
       totpSecret: totpSecret.toString('base64'),
     });
-    const app = createApp(repository, { authRateLimiter: limiter });
+    const app = createApp(repository, {
+      authRateLimiter: limiter,
+      sessionRevocationStore: revocations,
+    });
     const passwordSession = await app.inject({
       method: 'POST',
       url: '/v1/auth/password/session',
@@ -129,6 +137,14 @@ describe('versioned API contracts', () => {
       headers: { authorization: `Bearer ${mfaSession.json().accessToken as string}` },
     });
     expect(authorized.statusCode).toBe(200);
+    const authorization = { authorization: `Bearer ${mfaSession.json().accessToken as string}` };
+    expect(
+      (await app.inject({ method: 'POST', url: '/v1/auth/logout', headers: authorization }))
+        .statusCode,
+    ).toBe(204);
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/people', headers: authorization })).statusCode,
+    ).toBe(401);
 
     const unknownTenant = crypto.randomUUID();
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -155,6 +171,56 @@ describe('versioned API contracts', () => {
     expect(limited.statusCode).toBe(429);
     await app.close();
     await limiter.close();
+    await revocations.close();
+    await repository.close();
+  });
+
+  it('authenticates, deduplicates, and orders billing webhooks in PostgreSQL', async () => {
+    const repository = new PostgresContinuityRepository(process.env.DATABASE_URL!);
+    const secret = 'whsec_contract_secret_with_32_bytes';
+    const app = createApp(repository, { stripeWebhookSecret: secret });
+    const tenantId = crypto.randomUUID();
+    const householdId = crypto.randomUUID();
+    const timestamp = Math.floor(Date.now() / 1000);
+    const event = (id: string, created: number, status: string) =>
+      JSON.stringify({
+        id,
+        created,
+        type: 'customer.subscription.updated',
+        data: {
+          object: {
+            id: `sub_${tenantId}`,
+            customer: `cus_${tenantId}`,
+            status,
+            metadata: { tenantId, householdId },
+          },
+        },
+      });
+    const send = (body: string) => {
+      const signature = createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
+      return app.inject({
+        method: 'POST',
+        url: '/v1/billing/webhooks/stripe',
+        headers: {
+          'content-type': 'application/json',
+          'stripe-signature': `t=${timestamp},v1=${signature}`,
+        },
+        payload: body,
+      });
+    };
+    const current = event(`evt_${crypto.randomUUID()}`, timestamp, 'active');
+    expect((await send(current)).statusCode).toBe(202);
+    expect((await send(current)).json()).toEqual({ status: 'duplicate' });
+    const stale = event(`evt_${crypto.randomUUID()}`, timestamp - 1, 'past_due');
+    expect((await send(stale)).json()).toEqual({ status: 'stale' });
+    const forged = await app.inject({
+      method: 'POST',
+      url: '/v1/billing/webhooks/stripe',
+      headers: { 'content-type': 'application/json', 'stripe-signature': `t=${timestamp},v1=bad` },
+      payload: current,
+    });
+    expect(forged.statusCode).toBe(401);
+    await app.close();
     await repository.close();
   });
 });

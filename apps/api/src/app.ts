@@ -10,6 +10,7 @@ import {
   type RequestContext,
 } from '../../../packages/application/src/index.js';
 import {
+  accessRequestInput,
   errorEnvelope,
   householdInput,
   packetInput,
@@ -19,11 +20,7 @@ import {
   releaseTransitionInput,
   sessionClaims,
 } from '../../../packages/contracts/src/index.js';
-import {
-  DomainError,
-  transitionRelease,
-  type ReleaseState,
-} from '../../../packages/domain/src/index.js';
+import { DomainError, type ReleaseState } from '../../../packages/domain/src/index.js';
 import { createPrivacySafeLogger } from '../../../packages/infrastructure/observability/src/index.js';
 import {
   authorize,
@@ -34,6 +31,10 @@ import {
   verifyTotp,
   type AuthorizationContext,
 } from '../../../packages/infrastructure/auth/src/index.js';
+import {
+  verifyStripeWebhook,
+  type VerifiedBillingEvent,
+} from '../../../packages/infrastructure/billing/src/index.js';
 
 type AuthenticatedContext = RequestContext & Readonly<{ authorization: AuthorizationContext }>;
 type PasswordIdentityRepository = ContinuityRepository &
@@ -48,10 +49,21 @@ type PasswordIdentityRepository = ContinuityRepository &
       passwordHash: string;
       totpSecret?: string;
     }> | null>;
+    processBillingEvent(event: VerifiedBillingEvent): Promise<'processed' | 'duplicate' | 'stale'>;
+    transitionReleaseRequest(
+      context: RequestContext & { householdId: string },
+      accessRequestId: string,
+      next: ReleaseState,
+      idempotencyKey: string,
+    ): Promise<ReleaseState>;
   }>;
 type AuthRateLimiter = Readonly<{
   consume(tenantId: string, email: string): Promise<boolean>;
   reset(tenantId: string, email: string): Promise<void>;
+}>;
+type SessionRevocationStore = Readonly<{
+  isRevoked(jti: string): Promise<boolean>;
+  revoke(jti: string, expiresAt: number): Promise<void>;
 }>;
 
 function context(request: FastifyRequest, sessionSecret: string): AuthenticatedContext {
@@ -106,7 +118,12 @@ function requireHouseholdAuthorization(
 
 export function createApp(
   repository: PasswordIdentityRepository,
-  options: Readonly<{ sessionSecret?: string; authRateLimiter?: AuthRateLimiter }> = {},
+  options: Readonly<{
+    sessionSecret?: string;
+    authRateLimiter?: AuthRateLimiter;
+    sessionRevocationStore?: SessionRevocationStore;
+    stripeWebhookSecret?: string;
+  }> = {},
 ): FastifyInstance {
   const sessionSecret = options.sessionSecret ?? process.env.SESSION_SECRET;
   if (!sessionSecret || Buffer.byteLength(sessionSecret, 'utf8') < 32)
@@ -116,6 +133,34 @@ export function createApp(
     genReqId: () => randomUUID(),
     bodyLimit: 1_048_576,
     requestTimeout: 15_000,
+  });
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
+    const text = typeof body === 'string' ? body : body.toString('utf8');
+    (request as FastifyRequest & { rawBody?: string }).rawBody = text;
+    try {
+      done(null, JSON.parse(text));
+    } catch (error) {
+      done(error as Error);
+    }
+  });
+  app.addHook('onRequest', async (request) => {
+    const authorization = request.headers.authorization;
+    if (!authorization?.startsWith('Bearer ') || !options.sessionRevocationStore) return;
+    const claims = sessionClaims.safeParse(
+      verifySession(authorization.slice('Bearer '.length), sessionSecret),
+    );
+    if (!claims.success) return;
+    try {
+      if (await options.sessionRevocationStore.isRevoked(claims.data.jti))
+        throw new DomainError('AUTHENTICATION_REQUIRED', 'Authentication is required.');
+    } catch (error) {
+      if (error instanceof DomainError) throw error;
+      throw new DomainError(
+        'AUTH_SERVICE_UNAVAILABLE',
+        'Authentication is temporarily unavailable.',
+      );
+    }
   });
   const service = new ContinuityService(repository);
   const dummyPasswordHash = hashPassword(`dummy-${randomUUID()}-credential`);
@@ -138,13 +183,19 @@ export function createApp(
               ? 429
               : code === 'AUTH_SERVICE_UNAVAILABLE'
                 ? 503
-                : code === 'AUTHORIZATION_DENIED'
-                  ? 403
-                  : code === 'SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED'
-                    ? 409
-                    : code === 'PROHIBITED_SECRET'
-                      ? 422
-                      : 400;
+                : code === 'BILLING_PROVIDER_DISABLED'
+                  ? 503
+                  : code === 'BILLING_WEBHOOK_SIGNATURE_INVALID'
+                    ? 401
+                    : code === 'AUTHORIZATION_DENIED'
+                      ? 403
+                      : code === 'SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED'
+                        ? 409
+                        : code === 'RELEASE_POLICY_UNSATISFIED'
+                          ? 409
+                          : code === 'PROHIBITED_SECRET'
+                            ? 422
+                            : 400;
     void reply
       .status(status)
       .send(
@@ -227,6 +278,42 @@ export function createApp(
       assurance,
     });
   });
+  app.post('/v1/auth/logout', async (request, reply) => {
+    if (!options.sessionRevocationStore)
+      throw new DomainError(
+        'AUTH_SERVICE_UNAVAILABLE',
+        'Authentication is temporarily unavailable.',
+      );
+    const authorization = request.headers.authorization;
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : '';
+    const claims = sessionClaims.safeParse(verifySession(token, sessionSecret));
+    if (!claims.success)
+      throw new DomainError('AUTHENTICATION_REQUIRED', 'Authentication is required.');
+    await options.sessionRevocationStore.revoke(claims.data.jti, claims.data.exp);
+    return reply.status(204).send();
+  });
+  app.post('/v1/billing/webhooks/stripe', async (request, reply) => {
+    if (!options.stripeWebhookSecret)
+      throw new DomainError('BILLING_PROVIDER_DISABLED', 'Billing webhooks are not configured.');
+    const rawBody = (request as FastifyRequest & { rawBody?: string }).rawBody;
+    const signature = request.headers['stripe-signature'];
+    if (!rawBody || typeof signature !== 'string')
+      throw new DomainError(
+        'BILLING_WEBHOOK_SIGNATURE_INVALID',
+        'Billing webhook authentication failed.',
+      );
+    let event: VerifiedBillingEvent;
+    try {
+      event = verifyStripeWebhook(rawBody, signature, options.stripeWebhookSecret);
+    } catch {
+      throw new DomainError(
+        'BILLING_WEBHOOK_SIGNATURE_INVALID',
+        'Billing webhook authentication failed.',
+      );
+    }
+    const result = await repository.processBillingEvent(event);
+    return reply.status(result === 'processed' ? 202 : 200).send({ status: result });
+  });
   app.post('/v1/households', async (request, reply) => {
     const input = householdInput.parse(request.body);
     const authenticated = context(request, sessionSecret);
@@ -257,9 +344,21 @@ export function createApp(
     const manifest = await service.createPacket({ ...ctx, householdId: ctx.householdId }, input);
     return reply.status(201).send(manifest);
   });
-  app.post('/v1/releases/:state/transition', async (request) => {
+  app.post('/v1/access-requests', async (request, reply) => {
+    const input = accessRequestInput.parse(request.body);
+    const authenticated = context(request, sessionSecret);
+    if (!authenticated.householdId)
+      throw new DomainError('HOUSEHOLD_CONTEXT_REQUIRED', 'Household context is required.');
+    requireHouseholdAuthorization(authenticated, 'create:accessRequest', 'accessRequest');
+    const record = await service.createRecord(authenticated, 'accessRequest', {
+      ...input,
+      state: 'REQUESTED',
+    });
+    return reply.status(201).send(record);
+  });
+  app.post('/v1/releases/:accessRequestId/transition', async (request) => {
     const input = releaseTransitionInput.parse(request.body);
-    const params = request.params as { state: ReleaseState };
+    const params = request.params as { accessRequestId: string };
     const authenticated = context(request, sessionSecret);
     requireHouseholdAuthorization(
       authenticated,
@@ -268,17 +367,22 @@ export function createApp(
         : 'transition-release',
       'release',
     );
-    if (input.next === 'APPROVED_FOR_RELEASE' || input.next === 'RELEASED')
-      throw new DomainError(
-        'SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED',
-        'Release approval requires persisted server-verified policy evidence.',
-      );
+    if (!authenticated.householdId)
+      throw new DomainError('HOUSEHOLD_CONTEXT_REQUIRED', 'Household context is required.');
+    const idempotencyKey = request.headers['idempotency-key'];
+    if (
+      typeof idempotencyKey !== 'string' ||
+      idempotencyKey.length < 8 ||
+      idempotencyKey.length > 200
+    )
+      throw new DomainError('IDEMPOTENCY_KEY_REQUIRED', 'A valid idempotency key is required.');
     return {
-      state: transitionRelease(params.state, input.next, {
-        ...input.context,
-        challengeEndsAt: new Date(input.context.challengeEndsAt),
-        now: new Date(),
-      }),
+      state: await repository.transitionReleaseRequest(
+        { ...authenticated, householdId: authenticated.householdId },
+        params.accessRequestId,
+        input.next,
+        idempotencyKey,
+      ),
     };
   });
   app.post('/v1/privacy/requests', async (request, reply) => {
@@ -317,9 +421,6 @@ export function createApp(
     'family-iq': 'familyIqGap',
     recipients: 'recipient',
     'emergency-policies': 'emergencyPolicy',
-    'access-requests': 'accessRequest',
-    verifications: 'verification',
-    challenges: 'challenge',
     'annual-reviews': 'annualReview',
     consents: 'consent',
     exports: 'export',

@@ -62,6 +62,23 @@ export class RedisAuthRateLimiter {
   }
 }
 
+export class RedisSessionRevocationStore {
+  private readonly client: Redis;
+  constructor(url: string) {
+    this.client = new Redis(url, { maxRetriesPerRequest: 1, connectTimeout: 3_000 });
+  }
+  async isRevoked(jti: string): Promise<boolean> {
+    return (await this.client.exists(`auth:revoked:${jti}`)) === 1;
+  }
+  async revoke(jti: string, expiresAt: number): Promise<void> {
+    const ttl = Math.max(1, expiresAt - Date.now());
+    await this.client.set(`auth:revoked:${jti}`, '1', 'PX', ttl, 'NX');
+  }
+  async close(): Promise<void> {
+    await this.client.quit();
+  }
+}
+
 export type DurableJob = Readonly<{
   id: string;
   tenantId: string;
