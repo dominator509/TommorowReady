@@ -49,7 +49,7 @@ try {
       2,
     )}\n`,
   );
-  console.log(`local owner bootstrap: ok (${path}; secrets not printed)`);
+  console.log(`local owner bootstrap: ok (${path}; credential values withheld)`);
 } catch (error) {
   await handle.close();
   await import('node:fs/promises').then(({ rm }) => rm(path, { force: true }));

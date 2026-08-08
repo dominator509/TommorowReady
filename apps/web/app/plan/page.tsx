@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { PlanWorkbench } from '../components/PlanWorkbench';
 
 const steps = [
   [
@@ -22,7 +23,7 @@ export default function PlanPage() {
       <p className="lede">
         You can stop after any step. Nothing is shared until you review and approve it.
       </p>
-      <ol className="steps">
+      <ol className="steps" aria-label="Setup sequence">
         {steps.map(([number, title, detail]) => (
           <li key={number}>
             <span aria-hidden="true">{number}</span>
@@ -37,12 +38,11 @@ export default function PlanPage() {
         <h2 id="plan-boundary">Before you begin</h2>
         <p>Do not enter passwords, private keys, recovery phrases, or safe combinations.</p>
       </section>
-      <Link className="primary-action" href="/#people">
-        Begin with people
-      </Link>
-      <Link className="secondary-action" href="/">
-        Return to overview
-      </Link>
+      <PlanWorkbench />
+      <p className="page-links">
+        <Link href="/settings/security">Manage passkeys</Link>
+        <Link href="/">Return to overview</Link>
+      </p>
     </main>
   );
 }

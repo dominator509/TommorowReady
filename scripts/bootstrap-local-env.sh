@@ -41,10 +41,10 @@ backup_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
   printf '%s\n' 'AUTO_DEPLOY_AUTHORIZED=no'
   printf '%s\n' 'NODE_ENV=development'
   printf '%s\n' 'LOG_LEVEL=info'
-  printf '%s\n' 'APP_BASE_URL=http://127.0.0.1:3000'
-  printf '%s\n' 'API_BASE_URL=http://127.0.0.1:3001'
-  printf '%s\n' 'PASSKEY_RP_ID=127.0.0.1'
-  printf '%s\n' 'PASSKEY_ORIGIN=http://127.0.0.1:3000'
+  printf '%s\n' 'APP_BASE_URL=http://localhost:3000'
+  printf '%s\n' 'API_BASE_URL=http://127.0.0.1:4000'
+  printf '%s\n' 'PASSKEY_RP_ID=localhost'
+  printf '%s\n' 'PASSKEY_ORIGIN=http://localhost:3000'
 } > .env
 
 echo "local env: ok"

@@ -84,6 +84,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@simplewebauthn/browser':
+        specifier: 13.3.0
+        version: 13.3.0
       '@tomorrowready/ui':
         specifier: workspace:*
         version: link:../../packages/ui

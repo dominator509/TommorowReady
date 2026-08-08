@@ -562,6 +562,11 @@ export function createApp(
     const manifest = await service.createPacket({ ...ctx, householdId: ctx.householdId }, input);
     return reply.status(201).send(manifest);
   });
+  app.get('/v1/packets', async (request) => {
+    const authenticated = context(request, sessionSecret);
+    requireHouseholdAuthorization(authenticated, 'read:packet', 'packet');
+    return repository.list(authenticated, 'packet');
+  });
   app.post('/v1/access-requests', async (request, reply) => {
     const input = accessRequestInput.parse(request.body);
     const authenticated = context(request, sessionSecret);
@@ -573,6 +578,11 @@ export function createApp(
       state: 'REQUESTED',
     });
     return reply.status(201).send(record);
+  });
+  app.get('/v1/access-requests', async (request) => {
+    const authenticated = context(request, sessionSecret);
+    requireHouseholdAuthorization(authenticated, 'read:accessRequest', 'accessRequest');
+    return repository.list(authenticated, 'accessRequest');
   });
   app.post('/v1/releases/:accessRequestId/transition', async (request) => {
     const input = releaseTransitionInput.parse(request.body);

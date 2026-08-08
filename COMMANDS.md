@@ -9,6 +9,7 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Install: `sh scripts/install.sh`
 - Activate package manager: `corepack prepare pnpm@10.34.5 --activate`
 - Bootstrap lockfile: `pnpm install`
+- Refresh lockfile after an approved manifest change: `pnpm install --no-frozen-lockfile`
 - Preflight: `sh scripts/preflight.sh`
 - Lint: `sh scripts/lint.sh`
 - Format check: `sh scripts/format-check.sh`

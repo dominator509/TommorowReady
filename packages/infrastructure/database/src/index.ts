@@ -189,6 +189,7 @@ const kindTable: Readonly<Record<string, string>> = {
   privacyRequest: 'privacy_requests',
   export: 'exports',
   subscription: 'subscriptions',
+  packet: 'packet_manifests',
   readinessResult: 'readiness_results',
   familyIqGap: 'family_iq_gaps',
   recipient: 'packet_recipients',

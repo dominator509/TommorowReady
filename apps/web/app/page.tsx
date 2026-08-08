@@ -16,8 +16,11 @@ export default function HomePage() {
         <Link className="primary-action" href="/plan">
           Continue my plan
         </Link>
+        <Link className="secondary-action" href="/sign-in">
+          Sign in securely
+        </Link>
       </header>
-      <section aria-labelledby="readiness-heading" className="panel">
+      <section aria-labelledby="readiness-heading" className="panel" id="readiness">
         <h2 id="readiness-heading">Family Readiness</h2>
         <p>
           <strong>Not yet calculated</strong> — only confirmed records count.
@@ -32,7 +35,7 @@ export default function HomePage() {
           </a>
         ))}
       </nav>
-      <section className="notice" aria-labelledby="safety-heading">
+      <section className="notice" aria-labelledby="safety-heading" id="privacy-and-settings">
         <h2 id="safety-heading">Important safety boundary</h2>
         <p>
           TomorrowReady is not a password manager, law firm, emergency service, or autonomous

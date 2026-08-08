@@ -5,9 +5,10 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   reporter: 'line',
-  use: { baseURL: 'http://127.0.0.1:3000', trace: 'retain-on-failure' },
+  use: { baseURL: 'http://localhost:3000', trace: 'retain-on-failure' },
   webServer: {
     command: 'pnpm --filter @tomorrowready/web dev',
+    env: { ...process.env, API_BASE_URL: 'http://127.0.0.1:4011' },
     url: 'http://127.0.0.1:3000',
     reuseExistingServer: false,
     timeout: 60_000,

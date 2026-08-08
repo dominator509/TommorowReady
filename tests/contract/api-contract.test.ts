@@ -39,6 +39,18 @@ describe('versioned API contracts', () => {
     const listed = await app.inject({ method: 'GET', url: '/v1/people', headers });
     expect(listed.statusCode).toBe(200);
     expect(listed.json()).toHaveLength(1);
+    const recipientId = crypto.randomUUID();
+    const packet = await app.inject({
+      method: 'POST',
+      url: '/v1/packets',
+      headers,
+      payload: { purpose: 'estate continuity', recipientId, itemIds: [created.json().id] },
+    });
+    expect(packet.statusCode).toBe(201);
+    const packets = await app.inject({ method: 'GET', url: '/v1/packets', headers });
+    expect(packets.statusCode).toBe(200);
+    expect(packets.json()).toHaveLength(1);
+    expect(packets.json()[0].payload).toMatchObject({ purpose: 'estate continuity', recipientId });
     await app.close();
     await repository.close();
   });

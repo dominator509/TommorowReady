@@ -39,3 +39,29 @@ test('guided plan is keyboard-reachable and preserves the safety boundary', asyn
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
 });
+
+for (const route of ['/sign-in', '/recover', '/settings/security', '/packets', '/privacy']) {
+  test(`${route} exposes labelled controls without serious accessibility violations`, async ({
+    page,
+  }) => {
+    await page.goto(route);
+    await expect(page.locator('main')).toBeVisible();
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(
+      results.violations.filter((violation) =>
+        ['critical', 'serious'].includes(violation.impact ?? ''),
+      ),
+    ).toEqual([]);
+  });
+}
+
+test('primary navigation and forms remain usable at a narrow viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto('/sign-in');
+  await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
+  await expect(page.getByLabel('Household tenant ID')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
