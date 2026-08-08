@@ -95,3 +95,7 @@
 2026-08-08T04:50:59Z | codex | EP-010 | RECOVERY_PASS | GitHub CI portability repair verified locally: Node 24.14.1 workflow pin, container-native PostgreSQL 17 backup and restore, verify: ok
 2026-08-08T04:55:03Z | codex | EP-010 | HOSTED_CI_PASS | GitHub Actions run 31240404134 completed successfully in 1m54s at ee0cfa61; all verify and teardown steps passed
 2026-08-08T04:55:03Z | codex | EP-010 | HARDENING | hosted CI reported checkout Node 20 deprecation annotation; update actions/checkout to official immutable v7.0.1 SHA and rerun
+2026-08-08T05:17:25Z | codex | EP-010 | DIAGNOSTIC_FAIL | pass-one broad supply-chain search exit 1 signature RG_NO_MATCH_OR_PATTERN_COMPLEXITY; split into simple enumerations and found release workflow action/runtime drift
+2026-08-08T05:17:26Z | codex | EP-010 | DIAGNOSTIC_FAIL | Docker digest inspect exit 1 signatures TEMPLATE_ESCAPE_ERROR and IMAGE_TAG_ABSENT; simplified template then pulled the exact existing base tag and resolved digest sha256:8510330d3eb72c804231a834b1a8ebb55cb3796c3e4431297a24d246b8add4d5
+2026-08-08T05:33:31Z | codex | EP-010 | DIAGNOSTIC_FAIL | pass-one combined validation exit 124 signature RTK_FILTERED_TIMEOUT; isolated commands through rtk proxy and retained bounded execution
+2026-08-08T05:33:32Z | codex | EP-010 | HARDENING_PASS | pass 1 complete: immutable Actions and container inputs; digest-pinned services healthy; api web worker builds passed; format security history scan and dependency audit green
