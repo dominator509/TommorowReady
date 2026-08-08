@@ -1,8 +1,9 @@
-import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { Pool, type PoolClient } from 'pg';
 import type { VerifiedBillingEvent } from '../../billing/src/index.js';
+import type { StoredPasskey } from '../../auth/src/passkeys.js';
 import type {
   ContinuityRepository,
   RequestContext,
@@ -204,16 +205,21 @@ export class PostgresContinuityRepository implements ContinuityRepository {
   readonly pool: Pool;
   private readonly fieldEncryptionKey: string;
   private readonly authLookupSecret: string;
+  private readonly recoveryTokenSecret: string;
   constructor(
     connectionString: string,
     fieldEncryptionKey = process.env.FIELD_ENCRYPTION_KEY ?? '',
     authLookupSecret = process.env.AUTH_LOOKUP_SECRET ?? '',
+    recoveryTokenSecret = process.env.RECOVERY_TOKEN_SECRET ?? '',
   ) {
     assertFieldEncryptionKey(fieldEncryptionKey);
     if (Buffer.byteLength(authLookupSecret, 'utf8') < 32)
       throw new Error('AUTH_LOOKUP_SECRET_INVALID');
+    if (Buffer.byteLength(recoveryTokenSecret, 'utf8') < 32)
+      throw new Error('RECOVERY_TOKEN_SECRET_INVALID');
     this.fieldEncryptionKey = fieldEncryptionKey;
     this.authLookupSecret = authLookupSecret;
+    this.recoveryTokenSecret = recoveryTokenSecret;
     this.pool = new Pool({
       connectionString,
       max: 10,
@@ -274,7 +280,7 @@ export class PostgresContinuityRepository implements ContinuityRepository {
             role: 'owner',
             ...(input.totpSecret ? { totpSecret: input.totpSecret } : {}),
           },
-          metadata: { emailLookup: this.emailLookup(tenantId, input.email) },
+          metadata: { emailLookup: this.emailLookup(tenantId, input.email), userId },
         },
         {
           table: 'memberships',
@@ -345,6 +351,249 @@ export class PostgresContinuityRepository implements ContinuityRepository {
         passwordHash: payload.passwordHash,
         ...(typeof payload.totpSecret === 'string' ? { totpSecret: payload.totpSecret } : {}),
       };
+    });
+  }
+
+  async issuePasswordRecovery(
+    tenantId: string,
+    email: string,
+  ): Promise<Readonly<{ email: string; token: string }> | null> {
+    const context: RequestContext = {
+      tenantId,
+      actorId: '00000000-0000-4000-8000-000000000000',
+      purpose: 'password recovery request',
+    };
+    return this.transaction(context, async (client) => {
+      const result = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM identities WHERE payload->>'emailLookup'=$1 FOR UPDATE",
+        [this.emailLookup(tenantId, email)],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      const payload = decryptPayload('identities', row, this.fieldEncryptionKey);
+      if (typeof payload.email !== 'string' || typeof payload.userId !== 'string')
+        throw new Error('AUTH_IDENTITY_INVALID');
+      const token = randomBytes(32).toString('base64url');
+      const recoveryTokenHash = this.recoveryHash(tenantId, payload.userId, token);
+      const stored = encryptPayload(
+        'identities',
+        row.id,
+        tenantId,
+        row.household_id,
+        {
+          ...payload,
+          recoveryTokenHash,
+          recoveryExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+        },
+        this.fieldEncryptionKey,
+        {
+          emailLookup: String((row.payload as Record<string, unknown>).emailLookup),
+          userId: payload.userId,
+        },
+      );
+      await client.query(
+        'UPDATE identities SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [stored, row.id],
+      );
+      return { email: payload.email, token };
+    });
+  }
+
+  async completePasswordRecovery(
+    tenantId: string,
+    email: string,
+    token: string,
+    passwordHash: string,
+  ): Promise<void> {
+    const context: RequestContext = {
+      tenantId,
+      actorId: '00000000-0000-4000-8000-000000000000',
+      purpose: 'password recovery completion',
+    };
+    const userId = await this.transaction(context, async (client) => {
+      const result = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM identities WHERE payload->>'emailLookup'=$1 FOR UPDATE",
+        [this.emailLookup(tenantId, email)],
+      );
+      const row = result.rows[0];
+      if (!row) throw new DomainError('AUTHENTICATION_FAILED', 'Recovery credential is invalid.');
+      const payload = decryptPayload('identities', row, this.fieldEncryptionKey);
+      if (
+        typeof payload.userId !== 'string' ||
+        typeof payload.recoveryTokenHash !== 'string' ||
+        typeof payload.recoveryExpiresAt !== 'string' ||
+        new Date(payload.recoveryExpiresAt) <= new Date()
+      )
+        throw new DomainError('AUTHENTICATION_FAILED', 'Recovery credential is invalid.');
+      const candidate = this.recoveryHash(tenantId, payload.userId, token);
+      if (
+        candidate.length !== payload.recoveryTokenHash.length ||
+        !timingSafeEqual(Buffer.from(candidate), Buffer.from(payload.recoveryTokenHash))
+      )
+        throw new DomainError('AUTHENTICATION_FAILED', 'Recovery credential is invalid.');
+      const { recoveryTokenHash: _hash, recoveryExpiresAt: _expiry, ...retained } = payload;
+      const stored = encryptPayload(
+        'identities',
+        row.id,
+        tenantId,
+        row.household_id,
+        { ...retained, passwordHash },
+        this.fieldEncryptionKey,
+        {
+          emailLookup: String((row.payload as Record<string, unknown>).emailLookup),
+          userId: payload.userId,
+        },
+      );
+      await client.query(
+        'UPDATE identities SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [stored, row.id],
+      );
+      return payload.userId;
+    });
+    await this.appendAudit(
+      { ...context, actorId: userId },
+      'auth:password-recovered',
+      userId,
+      createHash('sha256').update(`${tenantId}:${userId}:recovered`).digest('hex'),
+    );
+  }
+
+  private recoveryHash(tenantId: string, userId: string, token: string): string {
+    return createHmac('sha256', this.recoveryTokenSecret)
+      .update(`${tenantId}:${userId}:${token}`)
+      .digest('hex');
+  }
+
+  async findPasskeyIdentity(
+    tenantId: string,
+    email: string,
+  ): Promise<Readonly<{
+    userId: string;
+    householdId: string;
+    email: string;
+    role: 'owner';
+    passkeys: readonly StoredPasskey[];
+  }> | null> {
+    const context: RequestContext = {
+      tenantId,
+      actorId: '00000000-0000-4000-8000-000000000000',
+      purpose: 'passkey authentication',
+    };
+    return this.transaction(context, async (client) => {
+      const result = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM identities WHERE payload->>'emailLookup'=$1 LIMIT 1",
+        [this.emailLookup(tenantId, email)],
+      );
+      const row = result.rows[0];
+      return row ? this.passkeyIdentityFromRow(row) : null;
+    });
+  }
+
+  async findPasskeyIdentityByUserId(
+    tenantId: string,
+    userId: string,
+  ): Promise<Awaited<ReturnType<PostgresContinuityRepository['findPasskeyIdentity']>>> {
+    const context: RequestContext = {
+      tenantId,
+      actorId: userId,
+      purpose: 'passkey registration',
+    };
+    return this.transaction(context, async (client) => {
+      const result = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM identities WHERE payload->>'userId'=$1",
+        [userId],
+      );
+      if (result.rows[0]) return this.passkeyIdentityFromRow(result.rows[0]);
+      const fallback = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM identities',
+      );
+      for (const row of fallback.rows) {
+        const payload = decryptPayload('identities', row, this.fieldEncryptionKey);
+        if (payload.userId === userId) return this.passkeyIdentityFromRow(row);
+      }
+      return null;
+    });
+  }
+
+  async savePasskey(tenantId: string, userId: string, passkey: StoredPasskey): Promise<void> {
+    await this.updatePasskeys(tenantId, userId, (passkeys) => {
+      if (passkeys.some((existing) => existing.id === passkey.id))
+        throw new DomainError('PASSKEY_ALREADY_REGISTERED', 'Passkey is already registered.');
+      return [...passkeys, passkey];
+    });
+  }
+
+  async updatePasskeyCounter(
+    tenantId: string,
+    userId: string,
+    credentialId: string,
+    counter: number,
+  ): Promise<void> {
+    await this.updatePasskeys(tenantId, userId, (passkeys) =>
+      passkeys.map((passkey) => (passkey.id === credentialId ? { ...passkey, counter } : passkey)),
+    );
+  }
+
+  private passkeyIdentityFromRow(row: {
+    id: string;
+    tenant_id: string;
+    household_id: string | null;
+    payload: unknown;
+  }) {
+    const payload = decryptPayload('identities', row, this.fieldEncryptionKey);
+    if (
+      typeof payload.userId !== 'string' ||
+      typeof payload.householdId !== 'string' ||
+      typeof payload.email !== 'string' ||
+      payload.role !== 'owner'
+    )
+      throw new Error('AUTH_IDENTITY_INVALID');
+    return {
+      userId: payload.userId,
+      householdId: payload.householdId,
+      email: payload.email,
+      role: payload.role,
+      passkeys: Array.isArray(payload.passkeys) ? (payload.passkeys as StoredPasskey[]) : [],
+    } as const;
+  }
+
+  private async updatePasskeys(
+    tenantId: string,
+    userId: string,
+    update: (passkeys: readonly StoredPasskey[]) => readonly StoredPasskey[],
+  ): Promise<void> {
+    const context: RequestContext = {
+      tenantId,
+      actorId: userId,
+      purpose: 'passkey credential update',
+    };
+    await this.transaction(context, async (client) => {
+      const result = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM identities FOR UPDATE',
+      );
+      const row = result.rows.find((candidate) => {
+        const payload = decryptPayload('identities', candidate, this.fieldEncryptionKey);
+        return payload.userId === userId;
+      });
+      if (!row) throw new DomainError('AUTHENTICATION_FAILED', 'The credential is invalid.');
+      const payload = decryptPayload('identities', row, this.fieldEncryptionKey);
+      const passkeys = Array.isArray(payload.passkeys) ? (payload.passkeys as StoredPasskey[]) : [];
+      const stored = encryptPayload(
+        'identities',
+        row.id,
+        tenantId,
+        row.household_id,
+        { ...payload, passkeys: update(passkeys) },
+        this.fieldEncryptionKey,
+        {
+          emailLookup: String((row.payload as Record<string, unknown>).emailLookup),
+          userId,
+        },
+      );
+      await client.query(
+        'UPDATE identities SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [stored, row.id],
+      );
     });
   }
 
@@ -885,6 +1134,7 @@ export async function migrateDatabase(
             'migrations/003_auth_lookup.sql',
             'migrations/004_billing_idempotency.sql',
             'migrations/005_release_idempotency.sql',
+            'migrations/006_passkey_lookup.sql',
           ]
         : [path];
     await pool.query('CREATE SCHEMA IF NOT EXISTS app');

@@ -8,6 +8,7 @@ import {
 } from '../../packages/infrastructure/database/src/index.js';
 import {
   RedisAuthRateLimiter,
+  RedisPasskeyChallengeStore,
   RedisSessionRevocationStore,
 } from '../../packages/infrastructure/database/src/services.js';
 import { hashPassword, totp } from '../../packages/infrastructure/auth/src/index.js';
@@ -99,6 +100,8 @@ describe('versioned API contracts', () => {
     const repository = new PostgresContinuityRepository(process.env.DATABASE_URL!);
     const limiter = new RedisAuthRateLimiter(process.env.REDIS_URL!, 2, 60);
     const revocations = new RedisSessionRevocationStore(process.env.REDIS_URL!);
+    const passkeyChallenges = new RedisPasskeyChallengeStore(process.env.REDIS_URL!);
+    let recoveryMessage = '';
     const password = 'a strong local authentication password';
     const totpSecret = Buffer.from(crypto.getRandomValues(new Uint8Array(20)));
     const owner = await repository.bootstrapOwner({
@@ -110,6 +113,15 @@ describe('versioned API contracts', () => {
     const app = createApp(repository, {
       authRateLimiter: limiter,
       sessionRevocationStore: revocations,
+      passkeyChallengeStore: passkeyChallenges,
+      passkeyRpId: '127.0.0.1',
+      passkeyOrigin: 'http://127.0.0.1:3000',
+      recoveryNotifier: {
+        async send(_to, _subject, text) {
+          recoveryMessage = text;
+        },
+      },
+      recoveryBaseUrl: 'http://127.0.0.1:3000',
     });
     const passwordSession = await app.inject({
       method: 'POST',
@@ -137,6 +149,71 @@ describe('versioned API contracts', () => {
       headers: { authorization: `Bearer ${mfaSession.json().accessToken as string}` },
     });
     expect(authorized.statusCode).toBe(200);
+    const registration = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/passkeys/registration/options',
+      headers: { authorization: `Bearer ${mfaSession.json().accessToken as string}` },
+    });
+    expect(registration.statusCode).toBe(200);
+    expect(registration.json().options).toMatchObject({
+      rp: { id: '127.0.0.1', name: 'TomorrowReady' },
+      authenticatorSelection: { userVerification: 'required' },
+    });
+    const invalidRegistration = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/passkeys/registration/verify',
+      headers: { authorization: `Bearer ${mfaSession.json().accessToken as string}` },
+      payload: { flowId: registration.json().flowId, response: {} },
+    });
+    expect(invalidRegistration.statusCode).toBe(400);
+    const replayedRegistration = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/passkeys/registration/verify',
+      headers: { authorization: `Bearer ${mfaSession.json().accessToken as string}` },
+      payload: { flowId: registration.json().flowId, response: {} },
+    });
+    expect(replayedRegistration.statusCode).toBe(400);
+    const recoveryRequest = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/password/recovery/request',
+      payload: { tenantId: owner.tenantId, email: 'owner@example.invalid' },
+    });
+    expect(recoveryRequest.statusCode).toBe(202);
+    const recoveryToken = /token=([A-Za-z0-9_-]{43})/.exec(recoveryMessage)?.[1];
+    expect(recoveryToken).toEqual(expect.any(String));
+    const recoveredPassword = 'a new strong local authentication password';
+    const recoveryComplete = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/password/recovery/complete',
+      payload: {
+        tenantId: owner.tenantId,
+        email: 'owner@example.invalid',
+        token: recoveryToken,
+        newPassword: recoveredPassword,
+      },
+    });
+    expect(recoveryComplete.statusCode).toBe(204);
+    const replayedRecovery = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/password/recovery/complete',
+      payload: {
+        tenantId: owner.tenantId,
+        email: 'owner@example.invalid',
+        token: recoveryToken,
+        newPassword: recoveredPassword,
+      },
+    });
+    expect(replayedRecovery.statusCode).toBe(401);
+    const recoveredSession = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/password/session',
+      payload: {
+        tenantId: owner.tenantId,
+        email: 'owner@example.invalid',
+        password: recoveredPassword,
+      },
+    });
+    expect(recoveredSession.statusCode).toBe(200);
     const authorization = { authorization: `Bearer ${mfaSession.json().accessToken as string}` };
     expect(
       (await app.inject({ method: 'POST', url: '/v1/auth/logout', headers: authorization }))
@@ -172,6 +249,7 @@ describe('versioned API contracts', () => {
     await app.close();
     await limiter.close();
     await revocations.close();
+    await passkeyChallenges.close();
     await repository.close();
   });
 

@@ -127,3 +127,6 @@
 2026-08-08T07:08:38Z | codex | EP-010 | FAILURE | session-revocation-typecheck|exit=1|signature=redis-client-api-mismatch|hypothesis=service-module-standardizes-on-ioredis-not-node-redis|next=use-existing-ioredis-client-and-px-nx-signature
 2026-08-08T07:14:32Z | codex | EP-010 | FAILURE | release-idempotency-audit-patch|exit=1|signature=formatted-context-mismatch|hypothesis=prettier-expanded-audit-call|next=apply-line-local-return-object-patch
 2026-08-08T07:20:10Z | codex | EP-010 | MILESTONE_PASS | hardening-pass4b billing authenticity/session revocation/persisted release/live-fire ok
+2026-08-08T07:29:35Z | codex | EP-010 | FAILURE | recovery-secret-generation|exit=1|signature=powershell-expanded-javascript-template-literal|hypothesis=backticks-and-dollar-expression-interpreted-before-node|next=use-concatenation-without-template-syntax
+2026-08-08T07:31:54Z | codex | EP-010 | FAILURE | recovery-typecheck|exit=1|signature=notifier-return-type-too-narrow|hypothesis=RealEmail-returns-message-id-string-while-port-declared-void|next=widen-port-result-to-unknown-without-using-provider-value
+2026-08-08T07:35:14Z | codex | EP-010 | MILESTONE_PASS | hardening-pass4 complete: auth recovery/passkey contracts and all backend gates ok

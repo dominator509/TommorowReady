@@ -8,6 +8,7 @@ postgres_app_password=$(openssl rand -hex 24)
 s3_secret=$(openssl rand -hex 24)
 session_secret=$(openssl rand -hex 32)
 auth_lookup_secret=$(openssl rand -hex 32)
+recovery_token_secret=$(openssl rand -hex 32)
 field_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
 backup_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
 
@@ -24,6 +25,7 @@ backup_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
   printf '%s\n' 'S3_BUCKET=tomorrowready-private'
   printf 'SESSION_SECRET=%s\n' "$session_secret"
   printf 'AUTH_LOOKUP_SECRET=%s\n' "$auth_lookup_secret"
+  printf 'RECOVERY_TOKEN_SECRET=%s\n' "$recovery_token_secret"
   printf 'FIELD_ENCRYPTION_KEY=%s\n' "$field_encryption_key"
   printf 'BACKUP_ENCRYPTION_KEY=%s\n' "$backup_encryption_key"
   printf '%s\n' 'DEEPSEEK_API_KEY='
@@ -41,6 +43,8 @@ backup_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
   printf '%s\n' 'LOG_LEVEL=info'
   printf '%s\n' 'APP_BASE_URL=http://127.0.0.1:3000'
   printf '%s\n' 'API_BASE_URL=http://127.0.0.1:3001'
+  printf '%s\n' 'PASSKEY_RP_ID=127.0.0.1'
+  printf '%s\n' 'PASSKEY_ORIGIN=http://127.0.0.1:3000'
 } > .env
 
 echo "local env: ok"

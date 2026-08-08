@@ -40,6 +40,26 @@ export const passwordSessionInput = z
       .optional(),
   })
   .strict();
+export const passwordRecoveryRequestInput = z
+  .object({ tenantId: z.string().uuid(), email: z.email().max(320) })
+  .strict();
+export const passwordRecoveryCompleteInput = z
+  .object({
+    tenantId: z.string().uuid(),
+    email: z.email().max(320),
+    token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    newPassword: z.string().min(12).max(256),
+  })
+  .strict();
+export const passkeyAuthenticationOptionsInput = z
+  .object({ tenantId: z.string().uuid(), email: z.email().max(320) })
+  .strict();
+export const passkeyCeremonyInput = z
+  .object({
+    flowId: z.string().uuid(),
+    response: z.record(z.string(), z.unknown()),
+  })
+  .strict();
 export const recordInput = z.object({
   kind: z.string().min(1).max(80),
   payload: z.record(z.string(), z.unknown()),

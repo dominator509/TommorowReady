@@ -37,6 +37,7 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Local port owner: `docker ps --filter publish=1025 --format '{{.ID}} {{.Names}} {{.Ports}}'`
 - Toolchain evidence: `node --version && corepack pnpm --version && docker --version && docker compose version && git --version && psql --version && redis-cli --version`
 - Dependency version evidence: `pnpm view <package> version`
+- Add reviewed exact dependency: `pnpm add -w --save-exact <package>@<version>`
 - Local environment: `sh scripts/bootstrap-local-env.sh`
 - Local owner bootstrap: `pnpm exec tsx scripts/bootstrap-local-owner.ts` (writes ignored mode-0600 credentials to `.agent/state/local-credentials/owner.json`; never prints secrets)
 - Load local environment: `set -a; . ./.env; set +a`

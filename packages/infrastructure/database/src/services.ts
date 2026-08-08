@@ -79,6 +79,30 @@ export class RedisSessionRevocationStore {
   }
 }
 
+export class RedisPasskeyChallengeStore {
+  private readonly client: Redis;
+  constructor(url: string) {
+    this.client = new Redis(url, { maxRetriesPerRequest: 1, connectTimeout: 3_000 });
+  }
+  async put(flowId: string, value: Readonly<Record<string, unknown>>): Promise<void> {
+    const result = await this.client.set(
+      `tomorrowready:passkey:${flowId}`,
+      JSON.stringify(value),
+      'EX',
+      300,
+      'NX',
+    );
+    if (result !== 'OK') throw new Error('PASSKEY_FLOW_COLLISION');
+  }
+  async take(flowId: string): Promise<Readonly<Record<string, unknown>> | null> {
+    const value = await this.client.getdel(`tomorrowready:passkey:${flowId}`);
+    return value ? (JSON.parse(value) as Readonly<Record<string, unknown>>) : null;
+  }
+  async close(): Promise<void> {
+    await this.client.quit();
+  }
+}
+
 export type DurableJob = Readonly<{
   id: string;
   tenantId: string;

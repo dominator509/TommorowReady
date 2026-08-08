@@ -14,6 +14,10 @@ import {
   errorEnvelope,
   householdInput,
   packetInput,
+  passkeyAuthenticationOptionsInput,
+  passkeyCeremonyInput,
+  passwordRecoveryCompleteInput,
+  passwordRecoveryRequestInput,
   passwordSessionInput,
   payloadInput,
   recordInput,
@@ -32,6 +36,14 @@ import {
   type AuthorizationContext,
 } from '../../../packages/infrastructure/auth/src/index.js';
 import {
+  passkeyAuthenticationOptions,
+  passkeyRegistrationOptions,
+  verifyPasskeyAuthentication,
+  verifyPasskeyRegistration,
+  type StoredPasskey,
+} from '../../../packages/infrastructure/auth/src/passkeys.js';
+import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
+import {
   verifyStripeWebhook,
   type VerifiedBillingEvent,
 } from '../../../packages/infrastructure/billing/src/index.js';
@@ -49,7 +61,26 @@ type PasswordIdentityRepository = ContinuityRepository &
       passwordHash: string;
       totpSecret?: string;
     }> | null>;
+    issuePasswordRecovery(
+      tenantId: string,
+      email: string,
+    ): Promise<Readonly<{ email: string; token: string }> | null>;
+    completePasswordRecovery(
+      tenantId: string,
+      email: string,
+      token: string,
+      passwordHash: string,
+    ): Promise<void>;
     processBillingEvent(event: VerifiedBillingEvent): Promise<'processed' | 'duplicate' | 'stale'>;
+    findPasskeyIdentity(tenantId: string, email: string): Promise<PasskeyIdentity | null>;
+    findPasskeyIdentityByUserId(tenantId: string, userId: string): Promise<PasskeyIdentity | null>;
+    savePasskey(tenantId: string, userId: string, passkey: StoredPasskey): Promise<void>;
+    updatePasskeyCounter(
+      tenantId: string,
+      userId: string,
+      credentialId: string,
+      counter: number,
+    ): Promise<void>;
     transitionReleaseRequest(
       context: RequestContext & { householdId: string },
       accessRequestId: string,
@@ -64,6 +95,20 @@ type AuthRateLimiter = Readonly<{
 type SessionRevocationStore = Readonly<{
   isRevoked(jti: string): Promise<boolean>;
   revoke(jti: string, expiresAt: number): Promise<void>;
+}>;
+type PasskeyIdentity = Readonly<{
+  userId: string;
+  householdId: string;
+  email: string;
+  role: 'owner';
+  passkeys: readonly StoredPasskey[];
+}>;
+type PasskeyChallengeStore = Readonly<{
+  put(flowId: string, value: Readonly<Record<string, unknown>>): Promise<void>;
+  take(flowId: string): Promise<Readonly<Record<string, unknown>> | null>;
+}>;
+type RecoveryNotifier = Readonly<{
+  send(to: string, subject: string, text: string): Promise<unknown>;
 }>;
 
 function context(request: FastifyRequest, sessionSecret: string): AuthenticatedContext {
@@ -122,6 +167,11 @@ export function createApp(
     sessionSecret?: string;
     authRateLimiter?: AuthRateLimiter;
     sessionRevocationStore?: SessionRevocationStore;
+    passkeyChallengeStore?: PasskeyChallengeStore;
+    passkeyRpId?: string;
+    passkeyOrigin?: string;
+    recoveryNotifier?: RecoveryNotifier;
+    recoveryBaseUrl?: string;
     stripeWebhookSecret?: string;
   }> = {},
 ): FastifyInstance {
@@ -277,6 +327,174 @@ export function createApp(
       expiresAt: expiresAt.toISOString(),
       assurance,
     });
+  });
+  app.post('/v1/auth/password/recovery/request', async (request, reply) => {
+    const input = passwordRecoveryRequestInput.parse(request.body);
+    if (!options.authRateLimiter || !options.recoveryNotifier || !options.recoveryBaseUrl)
+      throw new DomainError('AUTH_SERVICE_UNAVAILABLE', 'Account recovery is unavailable.');
+    const allowed = await options.authRateLimiter.consume(input.tenantId, input.email);
+    if (!allowed)
+      throw new DomainError('AUTH_RATE_LIMITED', 'Too many authentication attempts. Try later.');
+    const recovery = await repository.issuePasswordRecovery(input.tenantId, input.email);
+    if (recovery) {
+      const url = new URL('/recover', options.recoveryBaseUrl);
+      url.hash = new URLSearchParams({
+        tenantId: input.tenantId,
+        email: recovery.email,
+        token: recovery.token,
+      }).toString();
+      try {
+        await options.recoveryNotifier.send(
+          recovery.email,
+          'Reset your TomorrowReady password',
+          `Use this one-time link within 30 minutes: ${url.toString()}`,
+        );
+      } catch {
+        request.log.error({ code: 'RECOVERY_NOTIFICATION_FAILED' }, 'recovery notification failed');
+      }
+    }
+    return reply.status(202).send({ status: 'accepted' });
+  });
+  app.post('/v1/auth/password/recovery/complete', async (request, reply) => {
+    const input = passwordRecoveryCompleteInput.parse(request.body);
+    await repository.completePasswordRecovery(
+      input.tenantId,
+      input.email,
+      input.token,
+      await hashPassword(input.newPassword),
+    );
+    await options.authRateLimiter?.reset(input.tenantId, input.email);
+    return reply.status(204).send();
+  });
+  app.post('/v1/auth/passkeys/registration/options', async (request) => {
+    const authenticated = context(request, sessionSecret);
+    if (authenticated.authorization.assurance === 'password')
+      throw new DomainError('STEP_UP_REQUIRED', 'Multi-factor authentication is required.');
+    if (!options.passkeyChallengeStore || !options.passkeyRpId || !options.passkeyOrigin)
+      throw new DomainError('AUTH_SERVICE_UNAVAILABLE', 'Passkey authentication is unavailable.');
+    const identity = await repository.findPasskeyIdentityByUserId(
+      authenticated.tenantId,
+      authenticated.actorId,
+    );
+    if (!identity) throw new DomainError('AUTHENTICATION_REQUIRED', 'Authentication is required.');
+    const ceremony = await passkeyRegistrationOptions({
+      rpId: options.passkeyRpId,
+      userId: identity.userId,
+      email: identity.email,
+      existing: identity.passkeys,
+    });
+    const flowId = randomUUID();
+    await options.passkeyChallengeStore.put(flowId, {
+      kind: 'registration',
+      challenge: ceremony.challenge,
+      tenantId: authenticated.tenantId,
+      userId: identity.userId,
+    });
+    return { flowId, options: ceremony };
+  });
+  app.post('/v1/auth/passkeys/registration/verify', async (request, reply) => {
+    const authenticated = context(request, sessionSecret);
+    if (authenticated.authorization.assurance === 'password')
+      throw new DomainError('STEP_UP_REQUIRED', 'Multi-factor authentication is required.');
+    if (!options.passkeyChallengeStore || !options.passkeyRpId || !options.passkeyOrigin)
+      throw new DomainError('AUTH_SERVICE_UNAVAILABLE', 'Passkey authentication is unavailable.');
+    const input = passkeyCeremonyInput.parse(request.body);
+    const flow = await options.passkeyChallengeStore.take(input.flowId);
+    if (
+      flow?.kind !== 'registration' ||
+      flow.tenantId !== authenticated.tenantId ||
+      flow.userId !== authenticated.actorId ||
+      typeof flow.challenge !== 'string'
+    )
+      throw new DomainError('PASSKEY_FLOW_INVALID', 'Passkey ceremony is invalid or expired.');
+    try {
+      const passkey = await verifyPasskeyRegistration({
+        response: input.response as unknown as RegistrationResponseJSON,
+        challenge: flow.challenge,
+        origin: options.passkeyOrigin,
+        rpId: options.passkeyRpId,
+      });
+      await repository.savePasskey(authenticated.tenantId, authenticated.actorId, passkey);
+      return reply.status(201).send({ status: 'registered' });
+    } catch {
+      throw new DomainError('PASSKEY_REGISTRATION_INVALID', 'Passkey registration failed.');
+    }
+  });
+  app.post('/v1/auth/passkeys/authentication/options', async (request) => {
+    if (!options.passkeyChallengeStore || !options.passkeyRpId || !options.passkeyOrigin)
+      throw new DomainError('AUTH_SERVICE_UNAVAILABLE', 'Passkey authentication is unavailable.');
+    const input = passkeyAuthenticationOptionsInput.parse(request.body);
+    if (options.authRateLimiter) {
+      const allowed = await options.authRateLimiter.consume(input.tenantId, input.email);
+      if (!allowed)
+        throw new DomainError('AUTH_RATE_LIMITED', 'Too many authentication attempts. Try later.');
+    }
+    const identity = await repository.findPasskeyIdentity(input.tenantId, input.email);
+    const ceremony = await passkeyAuthenticationOptions({
+      rpId: options.passkeyRpId,
+      credentials: identity?.passkeys ?? [],
+    });
+    const flowId = randomUUID();
+    await options.passkeyChallengeStore.put(flowId, {
+      kind: 'authentication',
+      challenge: ceremony.challenge,
+      tenantId: input.tenantId,
+      email: input.email.trim().toLowerCase(),
+    });
+    return { flowId, options: ceremony };
+  });
+  app.post('/v1/auth/passkeys/authentication/verify', async (request, reply) => {
+    if (!options.passkeyChallengeStore || !options.passkeyRpId || !options.passkeyOrigin)
+      throw new DomainError('AUTH_SERVICE_UNAVAILABLE', 'Passkey authentication is unavailable.');
+    const input = passkeyCeremonyInput.parse(request.body);
+    const flow = await options.passkeyChallengeStore.take(input.flowId);
+    if (
+      flow?.kind !== 'authentication' ||
+      typeof flow.challenge !== 'string' ||
+      typeof flow.tenantId !== 'string' ||
+      typeof flow.email !== 'string'
+    )
+      throw new DomainError('AUTHENTICATION_FAILED', 'The credential is invalid.');
+    const identity = await repository.findPasskeyIdentity(flow.tenantId, flow.email);
+    const credentialId = typeof input.response.id === 'string' ? input.response.id : '';
+    const credential = identity?.passkeys.find((passkey) => passkey.id === credentialId);
+    if (!identity || !credential)
+      throw new DomainError('AUTHENTICATION_FAILED', 'The credential is invalid.');
+    try {
+      const counter = await verifyPasskeyAuthentication({
+        response: input.response as unknown as AuthenticationResponseJSON,
+        challenge: flow.challenge,
+        origin: options.passkeyOrigin,
+        rpId: options.passkeyRpId,
+        credential,
+      });
+      await repository.updatePasskeyCounter(flow.tenantId, identity.userId, credential.id, counter);
+      await options.authRateLimiter?.reset(flow.tenantId, flow.email);
+      const expiresAt = new Date(Date.now() + 15 * 60_000);
+      const token = signSession(
+        {
+          sub: identity.userId,
+          tenantId: flow.tenantId,
+          householdId: identity.householdId,
+          role: identity.role,
+          assurance: 'passkey',
+          actionGrants: [],
+          categoryGrants: [],
+          packetGrants: [],
+          purpose: 'authenticated household session',
+        },
+        sessionSecret,
+        expiresAt,
+      );
+      return reply.send({
+        accessToken: token,
+        tokenType: 'Bearer',
+        expiresAt: expiresAt.toISOString(),
+        assurance: 'passkey',
+      });
+    } catch {
+      throw new DomainError('AUTHENTICATION_FAILED', 'The credential is invalid.');
+    }
   });
   app.post('/v1/auth/logout', async (request, reply) => {
     if (!options.sessionRevocationStore)
