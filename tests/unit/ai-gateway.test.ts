@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { AiPolicyGateway } from '../../packages/infrastructure/ai-gateway/src/index.js';
+import {
+  AiPolicyGateway,
+  DeepSeekProvider,
+} from '../../packages/infrastructure/ai-gateway/src/index.js';
 
 const request = {
   tenantId: crypto.randomUUID(),
@@ -85,5 +88,37 @@ describe('AI policy gateway', () => {
       },
     });
     await expect(gateway.execute(request)).rejects.toThrow('Use a locator instruction');
+  });
+
+  it('retries retryable provider failures with bounded backoff and validates the response', async () => {
+    let calls = 0;
+    const sleeps: number[] = [];
+    const provider = new DeepSeekProvider(
+      'test-key-with-at-least-twenty-characters',
+      'http://127.0.0.1:9999',
+      'contract-model',
+      (async () => {
+        calls += 1;
+        if (calls < 3) return new Response('', { status: 503 });
+        return Response.json({
+          choices: [{ message: { content: JSON.stringify({ text: 'ok', evidenceIds: [] }) } }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, prompt_cache_hit_tokens: 2 },
+        });
+      }) as typeof fetch,
+      async (milliseconds) => {
+        sleeps.push(milliseconds);
+      },
+    );
+    const result = await provider.complete('{}', '{}', new AbortController().signal);
+    expect(calls).toBe(3);
+    expect(sleeps).toEqual([100, 200]);
+    expect(result).toMatchObject({ inputTokens: 3, outputTokens: 1, cacheHitTokens: 2 });
+  });
+
+  it('rejects insecure non-local provider endpoints', () => {
+    expect(
+      () =>
+        new DeepSeekProvider('test-key-with-at-least-twenty-characters', 'http://provider.example'),
+    ).toThrow('AI_BASE_URL_INSECURE');
   });
 });

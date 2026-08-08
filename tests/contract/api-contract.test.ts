@@ -5,6 +5,8 @@ import {
   migrateDatabase,
   PostgresContinuityRepository,
 } from '../../packages/infrastructure/database/src/index.js';
+import { RedisAuthRateLimiter } from '../../packages/infrastructure/database/src/services.js';
+import { hashPassword, totp } from '../../packages/infrastructure/auth/src/index.js';
 import { sessionHeaders } from '../helpers/auth.js';
 
 try {
@@ -88,5 +90,71 @@ describe('versioned API contracts', () => {
       dependency: 'database',
     });
     await app.close();
+  });
+  it('issues password and TOTP-assured sessions with real encrypted identity lookup and rate limiting', async () => {
+    const repository = new PostgresContinuityRepository(process.env.DATABASE_URL!);
+    const limiter = new RedisAuthRateLimiter(process.env.REDIS_URL!, 2, 60);
+    const password = 'a strong local authentication password';
+    const totpSecret = Buffer.from(crypto.getRandomValues(new Uint8Array(20)));
+    const owner = await repository.bootstrapOwner({
+      email: 'owner@example.invalid',
+      passwordHash: await hashPassword(password),
+      householdName: 'Authentication Proof Household',
+      totpSecret: totpSecret.toString('base64'),
+    });
+    const app = createApp(repository, { authRateLimiter: limiter });
+    const passwordSession = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/password/session',
+      payload: { tenantId: owner.tenantId, email: 'OWNER@example.invalid', password },
+    });
+    expect(passwordSession.statusCode).toBe(200);
+    expect(passwordSession.json()).toMatchObject({ tokenType: 'Bearer', assurance: 'password' });
+
+    const mfaSession = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/password/session',
+      payload: {
+        tenantId: owner.tenantId,
+        email: 'owner@example.invalid',
+        password,
+        totp: totp(totpSecret),
+      },
+    });
+    expect(mfaSession.statusCode).toBe(200);
+    expect(mfaSession.json().assurance).toBe('mfa');
+    const authorized = await app.inject({
+      method: 'GET',
+      url: '/v1/people',
+      headers: { authorization: `Bearer ${mfaSession.json().accessToken as string}` },
+    });
+    expect(authorized.statusCode).toBe(200);
+
+    const unknownTenant = crypto.randomUUID();
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const invalid = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/password/session',
+        payload: {
+          tenantId: unknownTenant,
+          email: 'unknown@example.invalid',
+          password: 'definitely the wrong password',
+        },
+      });
+      expect(invalid.statusCode).toBe(401);
+    }
+    const limited = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/password/session',
+      payload: {
+        tenantId: unknownTenant,
+        email: 'unknown@example.invalid',
+        password: 'definitely the wrong password',
+      },
+    });
+    expect(limited.statusCode).toBe(429);
+    await app.close();
+    await limiter.close();
+    await repository.close();
   });
 });

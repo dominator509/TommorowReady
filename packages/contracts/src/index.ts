@@ -19,12 +19,27 @@ export const sessionClaims = z
     categoryGrants: z.array(z.string().min(1).max(120)).max(200),
     packetGrants: z.array(z.string().uuid()).max(500),
     purpose: z.string().trim().min(3).max(120),
+    iss: z.literal('tomorrowready'),
+    aud: z.literal('tomorrowready-api'),
+    iat: z.number().int().nonnegative(),
     exp: z.number().int().positive(),
+    jti: z.string().uuid(),
     customerApproved: z.boolean().optional(),
     reason: z.string().trim().min(3).max(500).optional(),
   })
   .strict();
 export const householdInput = z.object({ name: z.string().trim().min(1).max(120) });
+export const passwordSessionInput = z
+  .object({
+    tenantId: z.string().uuid(),
+    email: z.email().max(320),
+    password: z.string().min(12).max(256),
+    totp: z
+      .string()
+      .regex(/^\d{6}$/)
+      .optional(),
+  })
+  .strict();
 export const recordInput = z.object({
   kind: z.string().min(1).max(80),
   payload: z.record(z.string(), z.unknown()),

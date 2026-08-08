@@ -1,4 +1,10 @@
-import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import {
+  createHmac,
+  randomBytes,
+  randomUUID,
+  scrypt as scryptCallback,
+  timingSafeEqual,
+} from 'node:crypto';
 import { promisify } from 'node:util';
 
 const scrypt = promisify(scryptCallback);
@@ -40,10 +46,19 @@ export function signSession(
   payload: Readonly<Record<string, unknown>>,
   secret: string,
   expiresAt: Date,
+  now = new Date(),
 ): string {
-  const body = Buffer.from(JSON.stringify({ ...payload, exp: expiresAt.getTime() })).toString(
-    'base64url',
-  );
+  if (expiresAt <= now) throw new Error('SESSION_EXPIRY_INVALID');
+  const body = Buffer.from(
+    JSON.stringify({
+      ...payload,
+      iss: 'tomorrowready',
+      aud: 'tomorrowready-api',
+      iat: now.getTime(),
+      exp: expiresAt.getTime(),
+      jti: randomUUID(),
+    }),
+  ).toString('base64url');
   const signature = createHmac('sha256', secret).update(body).digest('base64url');
   return `${body}.${signature}`;
 }
@@ -65,7 +80,17 @@ export function verifySession(
       string,
       unknown
     >;
-    return typeof value.exp === 'number' && value.exp > now.getTime() ? value : null;
+    return value.iss === 'tomorrowready' &&
+      value.aud === 'tomorrowready-api' &&
+      typeof value.iat === 'number' &&
+      value.iat <= now.getTime() + 30_000 &&
+      typeof value.exp === 'number' &&
+      value.exp > now.getTime() &&
+      value.exp - value.iat <= 15 * 60_000 &&
+      typeof value.jti === 'string' &&
+      /^[0-9a-f-]{36}$/i.test(value.jti)
+      ? value
+      : null;
   } catch {
     return null;
   }

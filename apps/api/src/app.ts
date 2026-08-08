@@ -13,6 +13,7 @@ import {
   errorEnvelope,
   householdInput,
   packetInput,
+  passwordSessionInput,
   payloadInput,
   recordInput,
   releaseTransitionInput,
@@ -26,11 +27,32 @@ import {
 import { createPrivacySafeLogger } from '../../../packages/infrastructure/observability/src/index.js';
 import {
   authorize,
+  hashPassword,
+  signSession,
+  verifyPassword,
   verifySession,
+  verifyTotp,
   type AuthorizationContext,
 } from '../../../packages/infrastructure/auth/src/index.js';
 
 type AuthenticatedContext = RequestContext & Readonly<{ authorization: AuthorizationContext }>;
+type PasswordIdentityRepository = ContinuityRepository &
+  Readonly<{
+    findPasswordIdentity(
+      tenantId: string,
+      email: string,
+    ): Promise<Readonly<{
+      userId: string;
+      householdId: string;
+      role: 'owner';
+      passwordHash: string;
+      totpSecret?: string;
+    }> | null>;
+  }>;
+type AuthRateLimiter = Readonly<{
+  consume(tenantId: string, email: string): Promise<boolean>;
+  reset(tenantId: string, email: string): Promise<void>;
+}>;
 
 function context(request: FastifyRequest, sessionSecret: string): AuthenticatedContext {
   const authorization = request.headers.authorization;
@@ -83,8 +105,8 @@ function requireHouseholdAuthorization(
 }
 
 export function createApp(
-  repository: ContinuityRepository,
-  options: Readonly<{ sessionSecret?: string }> = {},
+  repository: PasswordIdentityRepository,
+  options: Readonly<{ sessionSecret?: string; authRateLimiter?: AuthRateLimiter }> = {},
 ): FastifyInstance {
   const sessionSecret = options.sessionSecret ?? process.env.SESSION_SECRET;
   if (!sessionSecret || Buffer.byteLength(sessionSecret, 'utf8') < 32)
@@ -96,6 +118,7 @@ export function createApp(
     requestTimeout: 15_000,
   });
   const service = new ContinuityService(repository);
+  const dummyPasswordHash = hashPassword(`dummy-${randomUUID()}-credential`);
   app.setErrorHandler((error: unknown, request, reply) => {
     const safeError = error instanceof Error ? error : new Error('Unknown error');
     const code =
@@ -109,13 +132,19 @@ export function createApp(
         ? 500
         : code === 'AUTHENTICATION_REQUIRED'
           ? 401
-          : code === 'AUTHORIZATION_DENIED'
-            ? 403
-            : code === 'SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED'
-              ? 409
-              : code === 'PROHIBITED_SECRET'
-                ? 422
-                : 400;
+          : code === 'AUTHENTICATION_FAILED'
+            ? 401
+            : code === 'AUTH_RATE_LIMITED'
+              ? 429
+              : code === 'AUTH_SERVICE_UNAVAILABLE'
+                ? 503
+                : code === 'AUTHORIZATION_DENIED'
+                  ? 403
+                  : code === 'SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED'
+                    ? 409
+                    : code === 'PROHIBITED_SECRET'
+                      ? 422
+                      : 400;
     void reply
       .status(status)
       .send(
@@ -137,6 +166,67 @@ export function createApp(
   };
   app.get('/health/ready', readiness);
   app.get('/v1/health/ready', readiness);
+  app.post('/v1/auth/password/session', async (request, reply) => {
+    const input = passwordSessionInput.parse(request.body);
+    if (!options.authRateLimiter)
+      throw new DomainError(
+        'AUTH_SERVICE_UNAVAILABLE',
+        'Authentication is temporarily unavailable.',
+      );
+    let allowed: boolean;
+    try {
+      allowed = await options.authRateLimiter.consume(input.tenantId, input.email);
+    } catch {
+      throw new DomainError(
+        'AUTH_SERVICE_UNAVAILABLE',
+        'Authentication is temporarily unavailable.',
+      );
+    }
+    if (!allowed)
+      throw new DomainError('AUTH_RATE_LIMITED', 'Too many authentication attempts. Try later.');
+    const identity = await repository.findPasswordIdentity(input.tenantId, input.email);
+    const passwordValid = await verifyPassword(
+      input.password,
+      identity?.passwordHash ?? (await dummyPasswordHash),
+    );
+    if (!identity || !passwordValid)
+      throw new DomainError('AUTHENTICATION_FAILED', 'The credentials are invalid.');
+    let assurance: 'password' | 'mfa' = 'password';
+    if (input.totp) {
+      const secret = identity.totpSecret ? Buffer.from(identity.totpSecret, 'base64') : null;
+      if (
+        !secret ||
+        secret.length !== 20 ||
+        secret.toString('base64') !== identity.totpSecret ||
+        !verifyTotp(input.totp, secret)
+      )
+        throw new DomainError('AUTHENTICATION_FAILED', 'The credentials are invalid.');
+      assurance = 'mfa';
+    }
+    await options.authRateLimiter.reset(input.tenantId, input.email);
+    const expiresAt = new Date(Date.now() + 15 * 60_000);
+    const token = signSession(
+      {
+        sub: identity.userId,
+        tenantId: input.tenantId,
+        householdId: identity.householdId,
+        role: identity.role,
+        assurance,
+        actionGrants: [],
+        categoryGrants: [],
+        packetGrants: [],
+        purpose: 'authenticated household session',
+      },
+      sessionSecret,
+      expiresAt,
+    );
+    return reply.send({
+      accessToken: token,
+      tokenType: 'Bearer',
+      expiresAt: expiresAt.toISOString(),
+      assurance,
+    });
+  });
   app.post('/v1/households', async (request, reply) => {
     const input = householdInput.parse(request.body);
     const authenticated = context(request, sessionSecret);

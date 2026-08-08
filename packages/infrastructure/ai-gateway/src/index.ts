@@ -94,29 +94,63 @@ export class AiPolicyGateway {
 
 export class DeepSeekProvider implements AiProvider {
   readonly name = 'deepseek';
+  private consecutiveFailures = 0;
+  private circuitOpenUntil = 0;
   constructor(
     private readonly apiKey: string,
     private readonly baseUrl = 'https://api.deepseek.com',
     private readonly model = 'deepseek-chat',
-  ) {}
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly sleep: (milliseconds: number) => Promise<void> = (milliseconds) =>
+      new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  ) {
+    if (apiKey.trim().length < 20) throw new Error('AI_API_KEY_INVALID');
+    const url = new URL(baseUrl);
+    if (url.protocol !== 'https:' && url.hostname !== '127.0.0.1' && url.hostname !== 'localhost')
+      throw new Error('AI_BASE_URL_INSECURE');
+  }
   async complete(stablePrefix: string, content: string, signal: AbortSignal): Promise<AiResult> {
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          { role: 'system', content: stablePrefix },
-          { role: 'user', content },
-        ],
-        response_format: { type: 'json_object' },
-        stream: false,
-      }),
-      signal,
-    });
-    if (response.status === 429) throw new Error('AI_RATE_LIMITED');
-    if (!response.ok) throw new Error(`AI_PROVIDER_${response.status}`);
-    const payload = (await response.json()) as {
+    if (Date.now() < this.circuitOpenUntil) throw new Error('AI_CIRCUIT_OPEN');
+    let response: Response | undefined;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: this.model,
+            messages: [
+              { role: 'system', content: stablePrefix },
+              { role: 'user', content },
+            ],
+            response_format: { type: 'json_object' },
+            stream: false,
+          }),
+          signal,
+        });
+      } catch (error) {
+        if (signal.aborted) throw new Error('AI_PROVIDER_TIMEOUT');
+        if (attempt === 2) throw error;
+        await this.sleep(100 * 2 ** attempt);
+        continue;
+      }
+      if (response.ok || (response.status < 500 && response.status !== 429)) break;
+      if (attempt < 2) await this.sleep(100 * 2 ** attempt);
+    }
+    if (!response) throw new Error('AI_PROVIDER_UNAVAILABLE');
+    if (!response.ok) {
+      this.consecutiveFailures += 1;
+      if (this.consecutiveFailures >= 3) this.circuitOpenUntil = Date.now() + 30_000;
+      if (response.status === 429) throw new Error('AI_RATE_LIMITED');
+      throw new Error(`AI_PROVIDER_${response.status}`);
+    }
+    this.consecutiveFailures = 0;
+    const declaredLength = Number(response.headers.get('content-length') ?? '0');
+    if (declaredLength > 1_000_000) throw new Error('AI_PROVIDER_RESPONSE_TOO_LARGE');
+    const rawResponse = await response.text();
+    if (Buffer.byteLength(rawResponse, 'utf8') > 1_000_000)
+      throw new Error('AI_PROVIDER_RESPONSE_TOO_LARGE');
+    const payload = JSON.parse(rawResponse) as {
       choices?: Array<{ message?: { content?: string } }>;
       usage?: {
         prompt_tokens?: number;

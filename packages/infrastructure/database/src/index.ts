@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { Pool, type PoolClient } from 'pg';
@@ -137,6 +137,22 @@ function auditChainHash(input: Readonly<Record<string, unknown>>): string {
   return createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }
 
+function evidenceHashForBootstrap(input: {
+  email: string;
+  householdName: string;
+  totpSecret?: string;
+}): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        email: input.email.trim().toLowerCase(),
+        householdName: input.householdName,
+        totpConfigured: Boolean(input.totpSecret),
+      }),
+    )
+    .digest('hex');
+}
+
 const kindTable: Readonly<Record<string, string>> = {
   household: 'households',
   person: 'people',
@@ -181,12 +197,17 @@ const kindTable: Readonly<Record<string, string>> = {
 export class PostgresContinuityRepository implements ContinuityRepository {
   readonly pool: Pool;
   private readonly fieldEncryptionKey: string;
+  private readonly authLookupSecret: string;
   constructor(
     connectionString: string,
     fieldEncryptionKey = process.env.FIELD_ENCRYPTION_KEY ?? '',
+    authLookupSecret = process.env.AUTH_LOOKUP_SECRET ?? '',
   ) {
     assertFieldEncryptionKey(fieldEncryptionKey);
+    if (Buffer.byteLength(authLookupSecret, 'utf8') < 32)
+      throw new Error('AUTH_LOOKUP_SECRET_INVALID');
     this.fieldEncryptionKey = fieldEncryptionKey;
+    this.authLookupSecret = authLookupSecret;
     this.pool = new Pool({
       connectionString,
       max: 10,
@@ -196,6 +217,135 @@ export class PostgresContinuityRepository implements ContinuityRepository {
   }
   async close(): Promise<void> {
     await this.pool.end();
+  }
+
+  async bootstrapOwner(input: {
+    email: string;
+    passwordHash: string;
+    householdName: string;
+    totpSecret?: string;
+  }): Promise<Readonly<{ tenantId: string; householdId: string; userId: string }>> {
+    const tenantId = randomUUID();
+    const householdId = randomUUID();
+    const userId = randomUUID();
+    const identityId = randomUUID();
+    const membershipId = randomUUID();
+    const context: RequestContext = {
+      tenantId,
+      householdId,
+      actorId: userId,
+      purpose: 'local owner bootstrap',
+    };
+    await this.transaction(context, async (client) => {
+      const rows = [
+        {
+          table: 'tenants',
+          id: tenantId,
+          householdId: null,
+          payload: { name: input.householdName },
+        },
+        {
+          table: 'households',
+          id: householdId,
+          householdId,
+          payload: { name: input.householdName },
+        },
+        {
+          table: 'users',
+          id: userId,
+          householdId,
+          payload: { status: 'ACTIVE' },
+        },
+        {
+          table: 'identities',
+          id: identityId,
+          householdId: null,
+          payload: {
+            email: input.email,
+            passwordHash: input.passwordHash,
+            householdId,
+            userId,
+            role: 'owner',
+            ...(input.totpSecret ? { totpSecret: input.totpSecret } : {}),
+          },
+          metadata: { emailLookup: this.emailLookup(tenantId, input.email) },
+        },
+        {
+          table: 'memberships',
+          id: membershipId,
+          householdId,
+          payload: { userId, role: 'owner', status: 'ACTIVE' },
+        },
+      ] as const;
+      for (const row of rows) {
+        const payload = encryptPayload(
+          row.table,
+          row.id,
+          tenantId,
+          row.householdId,
+          row.payload,
+          this.fieldEncryptionKey,
+          'metadata' in row ? row.metadata : {},
+        );
+        await client.query(
+          `INSERT INTO ${row.table} (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)`,
+          [row.id, tenantId, row.householdId, payload],
+        );
+      }
+    });
+    await this.appendAudit(
+      context,
+      'auth:owner-bootstrap',
+      userId,
+      evidenceHashForBootstrap(input),
+    );
+    return { tenantId, householdId, userId };
+  }
+
+  async findPasswordIdentity(
+    tenantId: string,
+    email: string,
+  ): Promise<Readonly<{
+    userId: string;
+    householdId: string;
+    role: 'owner';
+    passwordHash: string;
+    totpSecret?: string;
+  }> | null> {
+    const context: RequestContext = {
+      tenantId,
+      actorId: '00000000-0000-0000-0000-000000000000',
+      purpose: 'password authentication',
+    };
+    return this.transaction(context, async (client) => {
+      const result = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM identities WHERE payload->>'emailLookup'=$1 LIMIT 1",
+        [this.emailLookup(tenantId, email)],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      const payload = decryptPayload('identities', row, this.fieldEncryptionKey);
+      if (
+        typeof payload.userId !== 'string' ||
+        typeof payload.householdId !== 'string' ||
+        payload.role !== 'owner' ||
+        typeof payload.passwordHash !== 'string'
+      )
+        throw new Error('AUTH_IDENTITY_INVALID');
+      return {
+        userId: payload.userId,
+        householdId: payload.householdId,
+        role: payload.role,
+        passwordHash: payload.passwordHash,
+        ...(typeof payload.totpSecret === 'string' ? { totpSecret: payload.totpSecret } : {}),
+      };
+    });
+  }
+
+  private emailLookup(tenantId: string, email: string): string {
+    return createHmac('sha256', this.authLookupSecret)
+      .update(`${tenantId}:${email.trim().toLowerCase()}`)
+      .digest('hex');
   }
   async ready(): Promise<boolean> {
     try {
@@ -385,7 +535,7 @@ export async function migrateDatabase(
     else await pool.query(`ALTER ROLE tomorrowready_app PASSWORD '${appPassword}'`);
     const migrationPaths =
       path === 'migrations/001_initial.sql'
-        ? [path, 'migrations/002_security_hardening.sql']
+        ? [path, 'migrations/002_security_hardening.sql', 'migrations/003_auth_lookup.sql']
         : [path];
     await pool.query('CREATE SCHEMA IF NOT EXISTS app');
     await pool.query(

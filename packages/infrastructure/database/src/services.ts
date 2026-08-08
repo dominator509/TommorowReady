@@ -27,6 +27,41 @@ export class RealQueue {
   }
 }
 
+export class RedisAuthRateLimiter {
+  private readonly client: Redis;
+  constructor(
+    url: string,
+    private readonly maximumAttempts = 5,
+    private readonly windowSeconds = 900,
+  ) {
+    this.client = new Redis(url, { maxRetriesPerRequest: 1, connectTimeout: 3_000 });
+  }
+
+  async consume(tenantId: string, email: string): Promise<boolean> {
+    const key = `tomorrowready:auth-attempts:${createHash('sha256')
+      .update(`${tenantId}:${email.trim().toLowerCase()}`)
+      .digest('hex')}`;
+    const script = `
+      local count = redis.call('INCR', KEYS[1])
+      if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+      return count
+    `;
+    const count = Number(await this.client.eval(script, 1, key, String(this.windowSeconds)));
+    return count <= this.maximumAttempts;
+  }
+
+  async reset(tenantId: string, email: string): Promise<void> {
+    const key = `tomorrowready:auth-attempts:${createHash('sha256')
+      .update(`${tenantId}:${email.trim().toLowerCase()}`)
+      .digest('hex')}`;
+    await this.client.del(key);
+  }
+
+  async close(): Promise<void> {
+    await this.client.quit();
+  }
+}
+
 export type DurableJob = Readonly<{
   id: string;
   tenantId: string;

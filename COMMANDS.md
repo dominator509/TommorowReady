@@ -38,6 +38,7 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Toolchain evidence: `node --version && corepack pnpm --version && docker --version && docker compose version && git --version && psql --version && redis-cli --version`
 - Dependency version evidence: `pnpm view <package> version`
 - Local environment: `sh scripts/bootstrap-local-env.sh`
+- Local owner bootstrap: `pnpm exec tsx scripts/bootstrap-local-owner.ts` (writes ignored mode-0600 credentials to `.agent/state/local-credentials/owner.json`; never prints secrets)
 - Load local environment: `set -a; . ./.env; set +a`
 - External requirements inventory: `sh scripts/external-requirements.sh`
 - Local start: `pnpm start > .agent/state/local.log 2>&1 & echo $! > .agent/state/local.pid; i=0; until curl -fsS http://127.0.0.1:4000/health/ready >/dev/null; do i=$((i+1)); [ "$i" -lt 30 ] || exit 1; sleep 2; done`

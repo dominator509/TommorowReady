@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+.agent/state/local-credentials/
 node_modules/
 .next/
 dist/
