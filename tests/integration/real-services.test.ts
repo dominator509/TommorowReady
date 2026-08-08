@@ -6,6 +6,7 @@ import {
 } from '../../packages/infrastructure/database/src/index.js';
 import {
   RealEmail,
+  RealJobQueue,
   RealObjectStorage,
   RealQueue,
 } from '../../packages/infrastructure/database/src/services.js';
@@ -34,6 +35,27 @@ describe('real local services', () => {
     };
     const record = await repository.create(first, 'person', { name: 'Alex' });
     expect((await repository.get(first, 'person', record.id))?.payload.name).toBe('Alex');
+    const second = await repository.create(first, 'person', { name: 'Morgan' });
+    const client = await repository.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [first.tenantId]);
+      await client.query("SELECT set_config('app.household_id', $1, true)", [first.householdId]);
+      const raw = await client.query('SELECT payload FROM people WHERE id=$1', [record.id]);
+      expect(JSON.stringify(raw.rows[0].payload)).not.toContain('Alex');
+      expect(raw.rows[0].payload).toHaveProperty('_tr_encrypted_v1');
+      await client.query('UPDATE people SET payload=$1 WHERE id=$2', [
+        raw.rows[0].payload,
+        second.id,
+      ]);
+      await client.query('COMMIT');
+    } finally {
+      client.release();
+    }
+    await expect(repository.get(first, 'person', second.id)).rejects.toThrow();
+    expect(
+      await repository.get({ ...first, householdId: crypto.randomUUID() }, 'person', record.id),
+    ).toBeNull();
     expect(
       await repository.get({ ...first, tenantId: crypto.randomUUID() }, 'person', record.id),
     ).toBeNull();
@@ -47,15 +69,23 @@ describe('real local services', () => {
       actorId: crypto.randomUUID(),
       purpose: 'append-only proof',
     };
-    await repository.appendAudit(context, 'evidence:test', crypto.randomUUID(), 'a'.repeat(64));
+    await repository.appendAudit(context, 'evidence:first', crypto.randomUUID(), 'a'.repeat(64));
+    await repository.appendAudit(context, 'evidence:second', crypto.randomUUID(), 'b'.repeat(64));
     const client = await repository.pool.connect();
     try {
       await client.query('BEGIN');
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [context.tenantId]);
-      const selected = await client.query('SELECT id FROM audit_events LIMIT 1');
+      await client.query("SELECT set_config('app.household_id', $1, true)", [context.householdId]);
+      const selected = await client.query(
+        "SELECT id, payload->>'previousHash' AS previous_hash, payload->>'chainHash' AS chain_hash FROM audit_events WHERE household_id=$1 ORDER BY created_at, id",
+        [context.householdId],
+      );
+      expect(selected.rows).toHaveLength(2);
+      expect(selected.rows[0].previous_hash).toBe('GENESIS');
+      expect(selected.rows[1].previous_hash).toBe(selected.rows[0].chain_hash);
       await expect(
         client.query("UPDATE audit_events SET payload='{}'::jsonb WHERE id=$1", [
-          selected.rows[0].id,
+          selected.rows[1].id,
         ]),
       ).rejects.toMatchObject({ message: 'append-only table' });
       await client.query('ROLLBACK');
@@ -69,6 +99,49 @@ describe('real local services', () => {
     expect(await queue.roundTrip('durable-boundary')).toBe('durable-boundary');
     await queue.close();
   });
+  it('enqueues, deduplicates, claims, and acknowledges a durable real-Valkey job', async () => {
+    const queue = new RealJobQueue(required('REDIS_URL'));
+    const job = {
+      id: crypto.randomUUID(),
+      tenantId: crypto.randomUUID(),
+      householdId: crypto.randomUUID(),
+      type: 'notification' as const,
+      idempotencyKey: crypto.randomUUID(),
+    };
+    const first = await queue.enqueue(job);
+    const duplicate = await queue.enqueue(job);
+    expect(first.enqueued).toBe(true);
+    expect(duplicate).toEqual({ enqueued: false, streamId: first.streamId });
+    const claimed = await queue.claim(`integration-${crypto.randomUUID()}`);
+    expect(claimed?.job).toEqual(job);
+    expect(claimed?.attempt).toBe(1);
+    await queue.acknowledge(claimed!.streamId);
+    await expect(
+      queue.enqueue({ ...job, type: 'arbitrary' } as unknown as typeof job),
+    ).rejects.toThrow('QUEUE_JOB_INVALID');
+    await queue.close();
+  });
+  it('reclaims stale jobs and dead-letters only after the bounded attempt limit', async () => {
+    const queue = new RealJobQueue(required('REDIS_URL'));
+    const job = {
+      id: crypto.randomUUID(),
+      tenantId: crypto.randomUUID(),
+      householdId: crypto.randomUUID(),
+      type: 'export' as const,
+      idempotencyKey: crypto.randomUUID(),
+    };
+    await queue.enqueue(job);
+    const first = await queue.claim(`first-${crypto.randomUUID()}`);
+    expect(await queue.fail(first!, 'PROVIDER_UNAVAILABLE', 2)).toEqual({ deadLettered: false });
+    const reclaimed = await queue.reclaimStale(`second-${crypto.randomUUID()}`, 0);
+    expect(reclaimed).toMatchObject({ job, attempt: 2 });
+    const before = await queue.deadLetterLength();
+    expect(await queue.fail(reclaimed!, 'PROVIDER_UNAVAILABLE', 2)).toEqual({
+      deadLettered: true,
+    });
+    expect(await queue.deadLetterLength()).toBe(before + 1);
+    await queue.close();
+  });
   it('round-trips a private object through real S3-compatible storage', async () => {
     const storage = new RealObjectStorage(
       required('S3_BUCKET'),
@@ -78,6 +151,21 @@ describe('real local services', () => {
     );
     await storage.ensureBucket();
     expect(await storage.roundTrip('immutable original test')).toBe('immutable original test');
+    const scope = {
+      tenantId: crypto.randomUUID(),
+      householdId: crypto.randomUUID(),
+      objectId: crypto.randomUUID(),
+    };
+    const body = Buffer.from('tenant-scoped immutable original', 'utf8');
+    await storage.putImmutable({ ...scope, body, contentType: 'text/plain' });
+    expect(await storage.getPrivate(scope)).toEqual(body);
+    await expect(
+      storage.putImmutable({ ...scope, body, contentType: 'text/plain' }),
+    ).rejects.toThrow('IMMUTABLE_OBJECT_ALREADY_EXISTS');
+    await expect(
+      storage.getPrivate({ ...scope, householdId: crypto.randomUUID() }),
+    ).rejects.toThrow();
+    await storage.deletePrivate(scope);
   });
   it('sends a real SMTP message to local capture', async () => {
     const email = new RealEmail(required('SMTP_URL'));

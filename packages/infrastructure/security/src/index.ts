@@ -7,15 +7,24 @@ export type EncryptedEnvelope = Readonly<{
   ciphertext: string;
   tag: string;
 }>;
+export function assertFieldEncryptionKey(base64Key: string): void {
+  const key = decodeBase64(base64Key, 'FIELD_ENCRYPTION_KEY_INVALID');
+  if (key.length !== 32) throw new Error('FIELD_ENCRYPTION_KEY_INVALID');
+}
 export function encryptRestricted(
   value: string,
   base64Key: string,
+  associatedData: string,
   keyVersion = 1,
 ): EncryptedEnvelope {
+  assertFieldEncryptionKey(base64Key);
   const key = Buffer.from(base64Key, 'base64');
-  if (key.length !== 32) throw new Error('FIELD_ENCRYPTION_KEY_INVALID');
+  if (!associatedData) throw new Error('FIELD_ENCRYPTION_CONTEXT_REQUIRED');
+  if (!Number.isSafeInteger(keyVersion) || keyVersion < 1)
+    throw new Error('FIELD_ENCRYPTION_KEY_VERSION_INVALID');
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(Buffer.from(associatedData, 'utf8'));
   const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
   return {
     algorithm: 'aes-256-gcm',
@@ -25,14 +34,34 @@ export function encryptRestricted(
     tag: cipher.getAuthTag().toString('base64'),
   };
 }
-export function decryptRestricted(envelope: EncryptedEnvelope, base64Key: string): string {
+export function decryptRestricted(
+  envelope: EncryptedEnvelope,
+  base64Key: string,
+  associatedData: string,
+): string {
+  assertFieldEncryptionKey(base64Key);
   const key = Buffer.from(base64Key, 'base64');
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
-  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
-  return Buffer.concat([
-    decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
-    decipher.final(),
-  ]).toString('utf8');
+  if (!associatedData) throw new Error('FIELD_ENCRYPTION_CONTEXT_REQUIRED');
+  if (envelope.algorithm !== 'aes-256-gcm') throw new Error('FIELD_ENCRYPTION_ALGORITHM_INVALID');
+  if (!Number.isSafeInteger(envelope.keyVersion) || envelope.keyVersion < 1)
+    throw new Error('FIELD_ENCRYPTION_KEY_VERSION_INVALID');
+  const iv = decodeBase64(envelope.iv, 'FIELD_ENCRYPTION_IV_INVALID');
+  const tag = decodeBase64(envelope.tag, 'FIELD_ENCRYPTION_TAG_INVALID');
+  const ciphertext = decodeBase64(envelope.ciphertext, 'FIELD_ENCRYPTION_CIPHERTEXT_INVALID');
+  if (iv.length !== 12) throw new Error('FIELD_ENCRYPTION_IV_INVALID');
+  if (tag.length !== 16) throw new Error('FIELD_ENCRYPTION_TAG_INVALID');
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAAD(Buffer.from(associatedData, 'utf8'));
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+}
+
+function decodeBase64(value: string, errorCode: string): Buffer {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))
+    throw new Error(errorCode);
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.toString('base64') !== value) throw new Error(errorCode);
+  return decoded;
 }
 
 export type UploadPolicy = Readonly<{

@@ -38,10 +38,12 @@ describe('authentication and encryption', () => {
   });
   it('round-trips restricted fields with authenticated encryption', () => {
     const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
-    const envelope = encryptRestricted('restricted value', key);
-    expect(decryptRestricted(envelope, key)).toBe('restricted value');
+    const context = 'tenant/household/person/record';
+    const envelope = encryptRestricted('restricted value', key, context);
+    expect(decryptRestricted(envelope, key, context)).toBe('restricted value');
     expect(() =>
-      decryptRestricted({ ...envelope, tag: Buffer.alloc(16).toString('base64') }, key),
+      decryptRestricted({ ...envelope, tag: Buffer.alloc(16).toString('base64') }, key, context),
     ).toThrow();
+    expect(() => decryptRestricted(envelope, key, `${context}/transplanted`)).toThrow();
   });
 });

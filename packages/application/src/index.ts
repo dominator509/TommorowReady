@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   assertSafeContent,
   buildPacketManifest,
+  evidenceHash,
   type PacketManifest,
 } from '../../domain/src/index.js';
 
@@ -46,7 +47,7 @@ export class ContinuityService {
     for (const value of Object.values(payload))
       if (typeof value === 'string') assertSafeContent(value);
     const record = await this.repository.create(context, kind, payload);
-    await this.repository.appendAudit(context, `create:${kind}`, record.id, record.id);
+    await this.repository.appendAudit(context, `create:${kind}`, record.id, evidenceHash(record));
     return record;
   }
   async createPacket(

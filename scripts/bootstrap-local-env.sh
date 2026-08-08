@@ -8,6 +8,7 @@ postgres_app_password=$(openssl rand -hex 24)
 s3_secret=$(openssl rand -hex 24)
 session_secret=$(openssl rand -hex 32)
 field_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
+backup_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
 
 {
   printf '%s\n' "# Generated local-only credentials. Never use these values in production."
@@ -22,6 +23,7 @@ field_encryption_key=$(openssl rand -base64 32 | tr -d '\r\n')
   printf '%s\n' 'S3_BUCKET=tomorrowready-private'
   printf 'SESSION_SECRET=%s\n' "$session_secret"
   printf 'FIELD_ENCRYPTION_KEY=%s\n' "$field_encryption_key"
+  printf 'BACKUP_ENCRYPTION_KEY=%s\n' "$backup_encryption_key"
   printf '%s\n' 'DEEPSEEK_API_KEY='
   printf '%s\n' 'SMTP_URL=smtp://127.0.0.1:1125'
   printf '%s\n' 'SMS_PROVIDER_TOKEN='

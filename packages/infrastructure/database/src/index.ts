@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { Pool, type PoolClient } from 'pg';
 import type {
   ContinuityRepository,
@@ -7,6 +8,134 @@ import type {
   StoredRecord,
 } from '../../../application/src/index.js';
 import type { PacketManifest } from '../../../domain/src/index.js';
+import {
+  assertFieldEncryptionKey,
+  decryptRestricted,
+  encryptRestricted,
+  type EncryptedEnvelope,
+} from '../../security/src/index.js';
+
+const encryptedPayloadKey = '_tr_encrypted_v1';
+const canonicalPayloadTables = [
+  'users',
+  'identities',
+  'tenants',
+  'households',
+  'memberships',
+  'people',
+  'dependents',
+  'children',
+  'pets',
+  'relationships',
+  'helper_grants',
+  'professional_contacts',
+  'emergency_contacts',
+  'account_locators',
+  'assets',
+  'debts',
+  'insurance_records',
+  'properties',
+  'storage_units',
+  'document_locations',
+  'documents',
+  'document_versions',
+  'extracted_candidates',
+  'confirmed_facts',
+  'playbooks',
+  'playbook_sections',
+  'funeral_wishes',
+  'letters',
+  'video_messages',
+  'advice_items',
+  'photos',
+  'recipes',
+  'evidence_references',
+  'readiness_rule_versions',
+  'readiness_results',
+  'family_iq_gaps',
+  'packet_definitions',
+  'packet_manifests',
+  'packet_manifest_items',
+  'packet_recipients',
+  'emergency_policies',
+  'access_requests',
+  'verification_evidence',
+  'challenges',
+  'denials',
+  'release_authorizations',
+  'released_packets',
+  'consents',
+  'annual_reviews',
+  'privacy_requests',
+  'exports',
+  'audit_events',
+  'outbox_events',
+  'inbox_events',
+  'jobs',
+  'subscriptions',
+  'ai_usage',
+] as const;
+const appendOnlyTables = [
+  'audit_events',
+  'consents',
+  'released_packets',
+  'verification_evidence',
+  'release_authorizations',
+  'packet_manifests',
+  'document_versions',
+  'evidence_references',
+] as const;
+
+type EncryptedPayload = Readonly<{ _tr_encrypted_v1: EncryptedEnvelope } & Record<string, unknown>>;
+
+function payloadContext(
+  table: string,
+  id: string,
+  tenantId: string,
+  householdId: string | null,
+): string {
+  return JSON.stringify({ version: 1, tenantId, householdId, table, id });
+}
+
+function encryptPayload(
+  table: string,
+  id: string,
+  tenantId: string,
+  householdId: string | null,
+  payload: Readonly<Record<string, unknown>>,
+  fieldEncryptionKey: string,
+  indexedMetadata: Readonly<Record<string, string>> = {},
+): EncryptedPayload {
+  return {
+    ...indexedMetadata,
+    [encryptedPayloadKey]: encryptRestricted(
+      JSON.stringify(payload),
+      fieldEncryptionKey,
+      payloadContext(table, id, tenantId, householdId),
+    ),
+  };
+}
+
+function decryptPayload(
+  table: string,
+  row: Readonly<{ id: string; tenant_id: string; household_id: string | null; payload: unknown }>,
+  fieldEncryptionKey: string,
+): Readonly<Record<string, unknown>> {
+  if (!row.payload || typeof row.payload !== 'object' || !(encryptedPayloadKey in row.payload))
+    throw new Error('PLAINTEXT_PAYLOAD_REJECTED');
+  const envelope = (row.payload as EncryptedPayload)[encryptedPayloadKey];
+  return JSON.parse(
+    decryptRestricted(
+      envelope,
+      fieldEncryptionKey,
+      payloadContext(table, row.id, row.tenant_id, row.household_id),
+    ),
+  ) as Readonly<Record<string, unknown>>;
+}
+
+function auditChainHash(input: Readonly<Record<string, unknown>>): string {
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex');
+}
 
 const kindTable: Readonly<Record<string, string>> = {
   household: 'households',
@@ -51,7 +180,13 @@ const kindTable: Readonly<Record<string, string>> = {
 
 export class PostgresContinuityRepository implements ContinuityRepository {
   readonly pool: Pool;
-  constructor(connectionString: string) {
+  private readonly fieldEncryptionKey: string;
+  constructor(
+    connectionString: string,
+    fieldEncryptionKey = process.env.FIELD_ENCRYPTION_KEY ?? '',
+  ) {
+    assertFieldEncryptionKey(fieldEncryptionKey);
+    this.fieldEncryptionKey = fieldEncryptionKey;
     this.pool = new Pool({
       connectionString,
       max: 10,
@@ -78,6 +213,9 @@ export class PostgresContinuityRepository implements ContinuityRepository {
     try {
       await client.query('BEGIN');
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [context.tenantId]);
+      await client.query("SELECT set_config('app.household_id', $1, true)", [
+        context.householdId ?? '',
+      ]);
       const value = await operation(client);
       await client.query('COMMIT');
       return value;
@@ -97,14 +235,25 @@ export class PostgresContinuityRepository implements ContinuityRepository {
     if (!table) throw new Error('UNKNOWN_RECORD_KIND');
     const id = randomUUID();
     return this.transaction(context, async (client) => {
+      const householdId = table === 'households' ? id : (context.householdId ?? null);
+      if (table === 'households')
+        await client.query("SELECT set_config('app.household_id', $1, true)", [id]);
+      const storedPayload = encryptPayload(
+        table,
+        id,
+        context.tenantId,
+        householdId,
+        payload,
+        this.fieldEncryptionKey,
+      );
       const result = await client.query(
         `INSERT INTO ${table} (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4) RETURNING version`,
-        [id, context.tenantId, context.householdId ?? null, payload],
+        [id, context.tenantId, householdId, storedPayload],
       );
       return {
         id,
         tenantId: context.tenantId,
-        ...(context.householdId ? { householdId: context.householdId } : {}),
+        ...(householdId ? { householdId } : {}),
         kind,
         payload,
         version: Number(result.rows[0].version),
@@ -126,7 +275,7 @@ export class PostgresContinuityRepository implements ContinuityRepository {
             tenantId: row.tenant_id,
             ...(row.household_id ? { householdId: row.household_id } : {}),
             kind,
-            payload: row.payload,
+            payload: decryptPayload(table, row, this.fieldEncryptionKey),
             version: row.version,
           }
         : null;
@@ -145,7 +294,7 @@ export class PostgresContinuityRepository implements ContinuityRepository {
         tenantId: row.tenant_id,
         ...(row.household_id ? { householdId: row.household_id } : {}),
         kind,
-        payload: row.payload,
+        payload: decryptPayload(table, row, this.fieldEncryptionKey),
         version: row.version,
       }));
     });
@@ -157,27 +306,61 @@ export class PostgresContinuityRepository implements ContinuityRepository {
     evidenceHash: string,
   ): Promise<void> {
     await this.transaction(context, async (client) => {
+      const chainScope = `${context.tenantId}:${context.householdId ?? 'tenant'}`;
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [chainScope]);
+      const previous = await client.query(
+        "SELECT payload->>'chainHash' AS chain_hash FROM audit_events WHERE household_id IS NOT DISTINCT FROM $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+        [context.householdId ?? null],
+      );
+      const previousHash = (previous.rows[0]?.chain_hash as string | undefined) ?? 'GENESIS';
+      const chainHash = auditChainHash({
+        tenantId: context.tenantId,
+        householdId: context.householdId ?? null,
+        actorId: context.actorId,
+        purpose: context.purpose,
+        operation,
+        targetId,
+        evidenceHash,
+        previousHash,
+      });
+      const id = randomUUID();
+      const payload = encryptPayload(
+        'audit_events',
+        id,
+        context.tenantId,
+        context.householdId ?? null,
+        {
+          actorId: context.actorId,
+          purpose: context.purpose,
+          operation,
+          targetId,
+          evidenceHash,
+          previousHash,
+          chainHash,
+        },
+        this.fieldEncryptionKey,
+        { previousHash, chainHash },
+      );
       await client.query(
         'INSERT INTO audit_events (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
-        [
-          randomUUID(),
-          context.tenantId,
-          context.householdId ?? null,
-          { actorId: context.actorId, purpose: context.purpose, operation, targetId, evidenceHash },
-        ],
+        [id, context.tenantId, context.householdId ?? null, payload],
       );
     });
   }
   async savePacket(context: RequestContext, manifest: PacketManifest): Promise<void> {
     await this.transaction(context, async (client) => {
+      const payload = encryptPayload(
+        'packet_manifests',
+        manifest.id,
+        manifest.tenantId,
+        manifest.householdId,
+        { ...manifest, approvedAt: manifest.approvedAt.toISOString() },
+        this.fieldEncryptionKey,
+        { hash: manifest.hash },
+      );
       await client.query(
         'INSERT INTO packet_manifests (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
-        [
-          manifest.id,
-          manifest.tenantId,
-          manifest.householdId,
-          { ...manifest, approvedAt: manifest.approvedAt.toISOString() },
-        ],
+        [manifest.id, manifest.tenantId, manifest.householdId, payload],
       );
     });
   }
@@ -187,9 +370,11 @@ export async function migrateDatabase(
   connectionString: string,
   path = 'migrations/001_initial.sql',
   appPassword = process.env.POSTGRES_APP_PASSWORD,
+  fieldEncryptionKey = process.env.FIELD_ENCRYPTION_KEY,
 ): Promise<void> {
   if (!appPassword || !/^[a-f0-9]{48}$/.test(appPassword))
     throw new Error('POSTGRES_APP_PASSWORD_INVALID');
+  assertFieldEncryptionKey(fieldEncryptionKey ?? '');
   const pool = new Pool({ connectionString, max: 1 });
   try {
     const role = await pool.query("SELECT 1 FROM pg_roles WHERE rolname='tomorrowready_app'");
@@ -198,8 +383,131 @@ export async function migrateDatabase(
         `CREATE ROLE tomorrowready_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD '${appPassword}'`,
       );
     else await pool.query(`ALTER ROLE tomorrowready_app PASSWORD '${appPassword}'`);
-    await pool.query(await readFile(path, 'utf8'));
+    const migrationPaths =
+      path === 'migrations/001_initial.sql'
+        ? [path, 'migrations/002_security_hardening.sql']
+        : [path];
+    await pool.query('CREATE SCHEMA IF NOT EXISTS app');
+    await pool.query(
+      'CREATE TABLE IF NOT EXISTS app.schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())',
+    );
+    for (const migrationPath of migrationPaths) {
+      const version = basename(migrationPath, '.sql');
+      const applied = await pool.query('SELECT 1 FROM app.schema_migrations WHERE version=$1', [
+        version,
+      ]);
+      if (applied.rowCount === 0) await pool.query(await readFile(migrationPath, 'utf8'));
+    }
+    await scopeLegacyHouseholds(pool, fieldEncryptionKey!);
+    await encryptLegacyPayloads(pool, fieldEncryptionKey!);
   } finally {
     await pool.end();
+  }
+}
+
+async function scopeLegacyHouseholds(pool: Pool, fieldEncryptionKey: string): Promise<void> {
+  const result = await pool.query(
+    'SELECT id, tenant_id, household_id, payload FROM households WHERE household_id IS NULL',
+  );
+  for (const row of result.rows) {
+    let payload = row.payload;
+    if (payload && typeof payload === 'object' && encryptedPayloadKey in payload) {
+      const plaintext = decryptPayload('households', row, fieldEncryptionKey);
+      payload = encryptPayload(
+        'households',
+        row.id,
+        row.tenant_id,
+        row.id,
+        plaintext,
+        fieldEncryptionKey,
+      );
+    }
+    await pool.query('UPDATE households SET household_id=$1, payload=$2 WHERE id=$1', [
+      row.id,
+      payload,
+    ]);
+  }
+}
+
+async function encryptLegacyPayloads(pool: Pool, fieldEncryptionKey: string): Promise<void> {
+  await pool.query('BEGIN');
+  try {
+    for (const table of appendOnlyTables)
+      await pool.query(`ALTER TABLE ${table} DISABLE TRIGGER USER`);
+    for (const table of canonicalPayloadTables) {
+      const result = await pool.query(
+        `SELECT id, tenant_id, household_id, payload FROM ${table} WHERE NOT (payload ? $1)`,
+        [encryptedPayloadKey],
+      );
+      for (const row of result.rows) {
+        const indexedMetadata: Record<string, string> = {};
+        if (
+          table === 'packet_manifests' &&
+          row.payload &&
+          typeof row.payload === 'object' &&
+          typeof row.payload.hash === 'string'
+        )
+          indexedMetadata.hash = row.payload.hash;
+        if (
+          (table === 'inbox_events' || table === 'outbox_events') &&
+          row.payload &&
+          typeof row.payload === 'object' &&
+          typeof row.payload.idempotencyKey === 'string'
+        )
+          indexedMetadata.idempotencyKey = row.payload.idempotencyKey;
+        const payload = encryptPayload(
+          table,
+          row.id,
+          row.tenant_id,
+          row.household_id,
+          row.payload,
+          fieldEncryptionKey,
+          indexedMetadata,
+        );
+        await pool.query(`UPDATE ${table} SET payload=$1 WHERE id=$2`, [payload, row.id]);
+      }
+    }
+    await backfillAndVerifyAuditChains(pool, fieldEncryptionKey);
+    for (const table of appendOnlyTables)
+      await pool.query(`ALTER TABLE ${table} ENABLE TRIGGER USER`);
+    await pool.query('COMMIT');
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    throw error;
+  }
+}
+
+async function backfillAndVerifyAuditChains(pool: Pool, fieldEncryptionKey: string): Promise<void> {
+  const result = await pool.query(
+    'SELECT id, tenant_id, household_id, payload FROM audit_events ORDER BY tenant_id, household_id NULLS FIRST, created_at, id',
+  );
+  const previousByScope = new Map<string, string>();
+  for (const row of result.rows) {
+    const scope = `${row.tenant_id}:${row.household_id ?? 'tenant'}`;
+    const previousHash = previousByScope.get(scope) ?? 'GENESIS';
+    const plaintext = decryptPayload('audit_events', row, fieldEncryptionKey);
+    const chainHash = auditChainHash({
+      tenantId: row.tenant_id,
+      householdId: row.household_id,
+      actorId: plaintext.actorId,
+      purpose: plaintext.purpose,
+      operation: plaintext.operation,
+      targetId: plaintext.targetId,
+      evidenceHash: plaintext.evidenceHash,
+      previousHash,
+    });
+    const existingPrevious = row.payload.previousHash as string | undefined;
+    const existingHash = row.payload.chainHash as string | undefined;
+    if (
+      (existingPrevious && existingPrevious !== previousHash) ||
+      (existingHash && existingHash !== chainHash)
+    )
+      throw new Error('AUDIT_CHAIN_INVALID');
+    if (!existingHash)
+      await pool.query(
+        "UPDATE audit_events SET payload=jsonb_set(jsonb_set(payload, '{previousHash}', to_jsonb($1::text)), '{chainHash}', to_jsonb($2::text)) WHERE id=$3",
+        [previousHash, chainHash, row.id],
+      );
+    previousByScope.set(scope, chainHash);
   }
 }
