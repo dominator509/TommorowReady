@@ -9,28 +9,28 @@
 | Current commit | This handoff is committed at repository `HEAD`; resolve the immutable value with `git rev-parse HEAD` |
 | Latest genuine green tag | `green/EP-009` |
 | Graph | EP-000 through EP-009 done; EP-010 engineering gates pass but ship evidence is externally unverified |
-| Engineering completion | 91% by green graph nodes (10 of 11); 100% of locally executable graph engineering and verification is complete |
+| Engineering completion | 100% of locally executable engineering and verification is complete across all six hardening passes; graph completion remains 10 of 11 because EP-010's production evidence cannot be manufactured locally |
 | Production release | Blocked; no release tag, registry push, staging deployment, DNS mutation, or production deployment occurred |
 | Why `RUN_COMPLETE` is unavailable | The operator attests that counsel/policy review, vendor reviews/DPAs, insurance, and an issue-free independent penetration test are complete, but their immutable evidence references are absent; production KMS/infrastructure/domain/monitoring, authenticated provider probes, staging/rollback evidence, and explicit configuration authorization are also absent |
 
-The ship gate ran after the sourced-environment build path was stabilized, emitted `verify: ok`, and exited 1 with `production readiness: FAIL - legal approval evidence missing`. Nothing converts that failure into approval.
+The ship gate reran the complete local verifier, emitted `verify: ok`, and exited 1 with `production readiness: FAIL - NODE_ENV must be production`. This is the correct first failure for the ignored local development environment; production credentials, the release-scoped evidence manifest, registry-qualified manifests, cluster authorization, and explicit deployment authorization remain absent. Nothing converts the operator's statements into the immutable release evidence required by the gate.
 
 ## Subsystem status
 
 | Subsystem | Status | Completed and passing | External verification remaining | Known risk |
 |---|---|---|---|---|
-| Toolchain and repository | Green | Pinned Node/pnpm workspace, ignored local secrets, CI, preflight | Hosted CI has not run in this local-only session | GitHub runner/environment drift |
+| Toolchain and repository | Green | Pinned Node/pnpm workspace, ignored local secrets, immutable Actions, CI browser dependencies, preflight | Hosted CI has not run in this local-only session | GitHub runner/environment drift |
 | Domain and invariants | Green locally | Confirmed-only readiness, scoped helpers, canonical packet hashes, deterministic release state machine, property tests | Independent threat-model and penetration-test approval | Real adversarial assessment absent |
 | PostgreSQL and persistence | Green locally | Canonical schema, migrations, forced RLS, distinct non-superuser app role, append-only evidence, backup/restore | Managed database, production backups, RPO/RTO | Local single-host durability only |
 | API and application | Green locally | Versioned routes, schema/context validation, safe errors, audit, real readiness | Staging ingress, production auth traffic, provider callbacks | Production edge and identity not exercised |
-| Web and accessibility | Green locally | Production build, overview/guided plan, keyboard, zoom, reduced motion, axe checks | Real-user/device accessibility review | Browser matrix is Chromium only |
-| Authentication and permissions | Green locally | Memory-hard passwords, TOTP, signed sessions, step-up decisions, tenant/packet/support authorization | Live passkey/OAuth/device and production session verification | External identity/device behavior unverified |
+| Web and accessibility | Green locally | Same-origin BFF, strict session cookie and origin checks, complete owner workflows, security headers, production build, keyboard, zoom, reduced motion, axe checks | Real-user/device accessibility review | Browser matrix is Chromium only |
+| Authentication and permissions | Green locally | Memory-hard passwords, TOTP, signed sessions, recovery, logout revocation, step-up, tenant/packet/support authorization, real virtual-authenticator WebAuthn ceremony | Production RP/domain/session verification and optional OAuth if later enabled | Production identity/device behavior unverified |
 | Upload and cryptography | Green locally | AES-GCM fields, checksum/MIME/magic/malware-clear gates | Production KMS, scanner, lifecycle, signed URL verification | Local key and scanner-state contracts only |
 | AI boundary | Green with provider disabled | Consent, DLP, tenant cache isolation, stable prefix, schema validation, disabled-provider failure | Approved DeepSeek credential and authenticated live probe if AI enabled | No live model output was credited |
 | Notifications and storage | Green locally | Real Mailpit SMTP and MinIO S3-compatible round trips | Production email/domain and cloud storage lifecycle probes | Provider-specific delivery/lifecycle unknown |
-| Observability and operations | Green locally | Redacted structured logs, bounded metrics, alert/runbook mapping, fail-closed readiness | Production sink, alert delivery, incident exercises | SLOs/RPO/RTO not production-evidenced |
-| Testing | Green locally | 27 unit/security, 8 integration/contract, 3 E2E, 3 browser tests, LF-01–LF-14 | Provider sandbox and staging live-fire | External effects not live-tested |
-| Deployment and rollback | Green locally | Stable non-root images, health checks, immutable rehearsal digests, repeated container rehearsal | Registry, platform overlay, staging deploy/rollback, DNS/TLS/WAF | Kubernetes file is a local-rehearsal baseline only |
+| Observability and operations | Green locally | Recursive bounded redaction, allowlisted HTTP metadata, dependency-aware API/web/worker readiness, bounded worker retries/reclaim/dead-letter, metrics and runbooks | Production sink, alert delivery, incident exercises, real job handler throughput | SLOs/RPO/RTO and provider-backed jobs not production-evidenced |
+| Testing | Green locally | 46 unit/security, 14 integration/contract, 5 E2E, 10 Chromium tests, LF-01–LF-14, backup/restore | Provider sandbox and staging live-fire | External effects not live-tested |
+| Deployment and rollback | Green locally | Pruned non-root images, active worker, health checks, immutable rehearsal digests, Kustomize render, guarded commit/evidence-bound deploy/rollback and HTTPS smoke | Registry, platform overlay, staging deploy/rollback, DNS/TLS/WAF | Kubernetes file is an offline/local baseline until an approved registry/platform overlay exists |
 | Legal, privacy, and business | Operator-attested; artifacts pending | Draft policies, consent/privacy request records, retention boundaries, deferred inventory; operator reports completed counsel, vendor/DPA, insurance, and penetration-test reviews | Immutable approval/report references, approved entity/contact text, publication evidence | Production launch remains prohibited until evidence probes pass |
 
 ## Graph status
@@ -47,7 +47,7 @@ The ship gate ran after the sourced-environment build path was stabilized, emitt
 | EP-007 Testing hardening | Done | `green/EP-007`; expanded sentinel, live-fire, browser, backup/restore |
 | EP-008 Observability/operations | Done | `green/EP-008`; redaction, metrics, alerts, readiness, runbooks |
 | EP-009 Deployment/release | Done | `green/EP-009`; stable images and repeated container rehearsal |
-| EP-010 Production readiness/ship | Engineering complete but externally unverified | Local `verify: ok`; ship gate exits 1 on missing legal evidence; no `NODE_DONE` or green tag permitted |
+| EP-010 Production readiness/ship | Engineering complete but externally unverified | Six hardening passes and local `verify: ok`; ship gate exits 1 at non-production `NODE_ENV`; no `NODE_DONE`, green tag, release tag, or deployment permitted |
 
 ## Deferred external requirements
 
@@ -71,6 +71,8 @@ The ship gate ran after the sourced-environment build path was stabilized, emitt
 | EXT-016 | Manual deployment authorization | `AUTO_DEPLOY_AUTHORIZED` | Set `yes` only after every other gate and reviewed mutation plan | `test "${AUTO_DEPLOY_AUTHORIZED:-no}" = yes` | `sh scripts/production-readiness-check.sh` | Production release | Yes |
 | EXT-017 | Optional media/transcription/print vendors | None | Select only approved vendors with restricted scopes | `git grep -n "transcription\|print fulfillment" BLUEPRINT_INPUT.md SUBPROCESSOR_REGISTER.md` | `sh scripts/live-fire.sh` plus provider contract/live probe | Optional derivatives/fulfillment | No if disabled |
 | EXT-018 | Legal entity, privacy contact, jurisdiction, policy publication | None | Counsel-approved entity/address/contact text and publication records | `git grep -n "must be inserted\|requires counsel" PRIVACY_POLICY_DRAFT.md TERMS_OF_SERVICE_DRAFT.md` | `sh scripts/production-readiness-check.sh` | Notices, rights, contracts | Yes |
+| EXT-019 | Production authentication secret custody and WebAuthn origin | `SESSION_SECRET`, `AUTH_LOOKUP_SECRET`, `RECOVERY_TOKEN_SECRET`, `PASSKEY_RP_ID`, `PASSKEY_ORIGIN` | Distinct 256-bit secrets in the approved secret manager and exact deployed HTTPS RP/origin | `test -n "$SESSION_SECRET" && test -n "$AUTH_LOOKUP_SECRET" && test -n "$RECOVERY_TOKEN_SECRET" && test -n "$PASSKEY_RP_ID" && test -n "$PASSKEY_ORIGIN"` | `sh scripts/test-integration.sh && pnpm test:browser` | First-party authentication and recovery | Yes |
+| EXT-020 | Release evidence, production manifests, cluster role, and mutation authorization | `PRODUCTION_EVIDENCE_FILE`, `PRODUCTION_EVIDENCE_SHA256`, `RELEASE_COMMIT`, `PRODUCTION_MANIFEST`, `PRODUCTION_MANIFEST_SHA256`, `ROLLBACK_MANIFEST`, `ROLLBACK_MANIFEST_SHA256`, `KUBERNETES_CONTEXT`, `PRODUCTION_NAMESPACE`, `PRODUCTION_BASE_URL`, `AUTO_DEPLOY_AUTHORIZED`, `ROLLBACK_AUTHORIZED` | Genuine hash-bound evidence plus registry-qualified digest manifests and namespace-limited role | `pnpm exec tsx scripts/deploy-production.ts --validate-only` | `sh scripts/production-readiness-check.sh && pnpm deploy:production && pnpm smoke:production` | Migration, API, web, worker, rollback | Yes |
 
 The authoritative detailed inventory is `.agent/state/DEFERRED_EXTERNALS.md`. On 2026-08-07 the operator attested that EXT-010 through EXT-013 are complete, including no penetration-test findings. No matching artifact or configured immutable reference was found, so these rows remain `DEFERRED`; never change a row to `VERIFIED` from an attestation or configuration presence alone.
 
@@ -91,6 +93,7 @@ Rerun all local and deferred gates:
 ```sh
 sh scripts/external-requirements.sh
 sh scripts/verify.sh
+kubectl kustomize infrastructure/kubernetes
 sh infrastructure/rehearse-containers.sh
 sh scripts/production-readiness-check.sh
 ```
@@ -106,13 +109,11 @@ pnpm smoke:production
 Rollback sequence after a real deployment:
 
 ```sh
-pnpm smoke:production
-# Pause release mutation and dispatch using the selected platform's reviewed command.
-# Roll back to the recorded prior registry digests; do not contract the database.
+ROLLBACK_AUTHORIZED=yes pnpm rollback:production
 pnpm smoke:production
 ```
 
-Provider-specific deploy, pause, image-rollback, and reconciliation commands cannot be written truthfully until EXT-015 selects the production platform. Add them to `COMMANDS.md`, `DEPLOYMENT.md`, and `ROLLBACK.md` through a reviewed ADR before first staging mutation.
+The guarded Kubernetes deploy and rollback commands are implemented without shell interpolation. EXT-015 must still select the cluster/registry and supply reviewed registry-qualified manifests, namespace/context, secrets, edge configuration, and reconciliation procedure before first staging mutation.
 
 ## Legal and business actions
 
@@ -130,7 +131,7 @@ Provider-specific deploy, pause, image-rollback, and reconciliation commands can
 - Local live-fire proves protocol-compatible services, not provider-specific delivery, lifecycle, billing, AI, or regional semantics.
 - Legal documents remain drafts and may contain placeholders. The operator reports completed counsel and related reviews, but no immutable references currently prove their scope, currency, publication, regulatory, rights, guardian, copyright, voice/likeness, or business authority.
 - The Kubernetes manifest deliberately defaults network traffic to deny and requires a reviewed platform allowlist overlay; applying it alone is not a production deployment.
-- The worker image is built and non-root, but production queue throughput and provider-backed job execution require staging evidence.
+- The worker is active, non-root, dependency-aware, and fail-closed for unconfigured job types. No current production API producer enqueues business jobs; any future producer must add a real handler and staging live-fire before enablement.
 - SLO, RPO, RTO, incident-response, regional failover, and production data-deletion claims remain unproven.
 
 ## Final operator checklist
@@ -138,8 +139,8 @@ Provider-specific deploy, pause, image-rollback, and reconciliation commands can
 1. Select EXT-015's production platform and regions; provide staging-only roles first and add exact provider commands through ADR review.
 2. Supply immutable references for the operator-attested EXT-010, EXT-011, EXT-012, and EXT-013 approvals/reports, and complete EXT-018 approved entity/contact/publication evidence before enabling any provider or public route.
 3. Provision staging database, Valkey, private storage, KMS, monitoring, alerting, backup, and edge controls; run every row's probe and validation.
-4. Push newly rebuilt images to the approved registry with signed provenance; replace local digests with registry-qualified digests.
-5. Deploy staging manually; execute migrations, smoke, E2E subset, provider probes, incident exercise, backup/restore, and image rollback.
-6. Reconcile every ambiguous external action and close all security/privacy findings.
-7. Run `sh scripts/verify.sh` and `sh scripts/production-readiness-check.sh` from a clean commit.
-8. Set `AUTO_DEPLOY_AUTHORIZED=yes` only after the full human review, then run `pnpm deploy:production` and `pnpm smoke:production`.
+4. Push the verified API/web/worker images to the approved registry with signed provenance; generate registry-qualified digest-only production and rollback manifests and validate each with `pnpm exec tsx scripts/deploy-production.ts --validate-only`.
+5. Set the production secret/TLS configuration, create the release-bound evidence manifest, and run `sh scripts/production-readiness-check.sh` without deployment authorization until it passes every evidence and manifest check except the final authorization gate.
+6. Deploy staging with the guarded command; execute migrations, `pnpm smoke:production`, the approved E2E subset, provider probes, incident exercise, backup/restore, and `ROLLBACK_AUTHORIZED=yes pnpm rollback:production`.
+7. Reconcile every ambiguous external action and close all security/privacy findings.
+8. Set `AUTO_DEPLOY_AUTHORIZED=yes` only after the full human review, rerun `sh scripts/production-readiness-check.sh`, then run `pnpm deploy:production` and `pnpm smoke:production`.

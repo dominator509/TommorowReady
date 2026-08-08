@@ -2,7 +2,10 @@ import { expect, test } from '@playwright/test';
 import { AxeBuilder } from '@axe-core/playwright';
 
 test('home is keyboard-operable and has no serious WCAG violations', async ({ page }) => {
-  await page.goto('/');
+  const response = await page.goto('/');
+  expect(response?.headers()['x-content-type-options']).toBe('nosniff');
+  expect(response?.headers()['x-frame-options']).toBe('DENY');
+  expect(response?.headers()['content-security-policy']).toContain("frame-ancestors 'none'");
   await expect(page.getByRole('heading', { level: 1 })).toContainText(
     'Everything your family needs',
   );
@@ -26,6 +29,9 @@ test('home remains usable at 200 percent zoom and reduced motion', async ({ page
     document.documentElement.style.zoom = '2';
   });
   await expect(page.getByRole('link', { name: 'Continue my plan' })).toBeVisible();
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = '';
+  });
 });
 
 test('guided plan is keyboard-reachable and preserves the safety boundary', async ({ page }) => {

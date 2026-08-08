@@ -12,3 +12,5 @@ Trigger on security breach, authorization bypass, data corruption, elevated dupl
 6. Keep the incident open until authorization, privacy, integrity, notification, and monitoring evidence are reviewed.
 
 Locally, `sh scripts/backup.sh`, `sh scripts/restore-drill.sh`, and `sh infrastructure/rehearse-containers.sh` prove the recoverable data artifact and prior/current image startup mechanics. They do not prove a production cluster rollback, registry availability, external action reconciliation, regional failover, or production RTO.
+
+For a real rollback, set `ROLLBACK_MANIFEST` to the previously approved digest-only manifest and `ROLLBACK_MANIFEST_SHA256` to its independently recorded lowercase SHA-256, retain the same `KUBERNETES_CONTEXT` and `PRODUCTION_NAMESPACE`, and set `ROLLBACK_AUTHORIZED=yes` only after the incident commander confirms the target digests. Run `pnpm rollback:production`, then `pnpm smoke:production`. The rollback command server-side applies only the hash-bound reviewed manifest and waits on API, web, and worker; it deliberately does not reverse database migrations.

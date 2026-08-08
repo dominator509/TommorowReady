@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { validateReleaseManifest } from './release-manifest.js';
 
 function required(name: string): string {
@@ -6,7 +6,6 @@ function required(name: string): string {
   if (!value) throw new Error(`${name}_REQUIRED`);
   return value;
 }
-
 function run(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: 'inherit', shell: false });
@@ -19,32 +18,19 @@ function run(command: string, args: string[]): Promise<void> {
   });
 }
 
-const validateOnly = process.argv.includes('--validate-only');
-const manifest = required('PRODUCTION_MANIFEST');
+if (process.env.ROLLBACK_AUTHORIZED !== 'yes') throw new Error('ROLLBACK_AUTHORIZED_REQUIRED');
+const manifest = required('ROLLBACK_MANIFEST');
 const context = required('KUBERNETES_CONTEXT');
 const namespace = required('PRODUCTION_NAMESPACE');
 if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(namespace))
   throw new Error('PRODUCTION_NAMESPACE_INVALID');
-await validateReleaseManifest(manifest, required('PRODUCTION_MANIFEST_SHA256'));
-if (validateOnly) {
-  console.log('production manifest: ok');
-  process.exit(0);
-}
-
-if (process.env.AUTO_DEPLOY_AUTHORIZED !== 'yes')
-  throw new Error('AUTO_DEPLOY_AUTHORIZED_REQUIRED');
-const expectedCommit = required('RELEASE_COMMIT');
-const actualCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-if (actualCommit !== expectedCommit) throw new Error('RELEASE_COMMIT_MISMATCH');
-if (execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim())
-  throw new Error('DEPLOYMENT_WORKTREE_NOT_CLEAN');
-
+await validateReleaseManifest(manifest, required('ROLLBACK_MANIFEST_SHA256'));
 const scope = ['--context', context, '--namespace', namespace];
 await run('kubectl', [
   ...scope,
   'apply',
   '--server-side',
-  '--field-manager=tomorrowready-release',
+  '--field-manager=tomorrowready-rollback',
   '--filename',
   manifest,
 ]);
@@ -56,4 +42,4 @@ for (const deployment of ['tomorrowready-api', 'tomorrowready-web', 'tomorrowrea
     `deployment/${deployment}`,
     '--timeout=10m',
   ]);
-console.log('deployment: ok');
+console.log('rollback: ok - database contract migrations were not reversed');

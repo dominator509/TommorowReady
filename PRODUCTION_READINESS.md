@@ -49,16 +49,23 @@ Production is permitted only when every item below has a current evidence comman
 
 The ship gate is: clean state -> `sh scripts/verify.sh` -> `sh scripts/production-readiness-check.sh` -> release tag -> exact MANUAL deploy command -> `RUN_COMPLETE`. No lesser state is production ready.
 
+## Evidence manifest contract
+
+`PRODUCTION_EVIDENCE_FILE` must point to an operator-controlled JSON file that is not committed with application source, and `PRODUCTION_EVIDENCE_SHA256` must equal its independently approved lowercase SHA-256. It binds `releaseCommit` to the clean checkout's exact `RELEASE_COMMIT` and contains version `1` plus a `records` object. Every record requires a non-placeholder artifact reference, the artifact's lowercase SHA-256, and an offset-aware approval time; expiring evidence also supplies `validUntil`. The legal, vendor, and insurance record references must exactly match their corresponding release environment references.
+
+Required record keys are `legalApproval`, `vendorRiskApproval`, `insuranceCoverage`, `penetrationTest`, `policyPublication`, `productionKmsProbe`, `productionBackupRestore`, `monitoringAlertDelivery`, `stagingSmoke`, `rollbackDrill`, `dnsTlsWafReview`, `providerLiveFire`, `incidentExercise`, `rpoRtoExercise`, and `deploymentPlanApproval`. Configuration presence alone is not proof: the hashes and references must resolve to the genuine scoped evidence reviewed by the release owner.
+
 ## Current evidence — 2026-08-07
 
 | Gate | Current evidence | Status |
 |---|---|---|
-| Complete local verification | `verify: ok`; 27 unit/security, 8 integration/contract, 3 API/performance E2E, 3 browser accessibility tests | Passed locally |
+| Complete local verification | `verify: ok`; 46 unit/security, 14 integration/contract, 5 API/performance E2E, 10 Chromium accessibility/WebAuthn tests | Passed locally |
 | Core outcomes | LF-01 through LF-14 each emitted `ok`; aggregate `live-fire: ok` | Passed against real local dependencies |
 | Backup and restore | `backup: ok`; `restore drill: ok` against an isolated PostgreSQL database | Passed locally |
-| Container release rehearsal | `container rehearsal: ok` on repeated runs; API and web ran non-root and API queried real PostgreSQL | Passed locally |
-| Immutable local images | API `a02406d473db...`; web `40379c2e3ab5...`; worker `9f9385ee3e48...` match the rehearsal manifest | Passed locally |
-| Production ship gate | Fresh sourced-environment run emitted `verify: ok`, then `production readiness: FAIL - legal approval evidence missing` | Blocked externally |
+| Container release rehearsal | `container rehearsal: ok`; API, web, and active Redis Streams worker ran non-root with dependency-aware readiness against real PostgreSQL and Valkey | Passed locally |
+| Immutable local images | API `3b4eddb70894...`; web `51abfab7a521...`; worker `9e5eac162883...` match the final rehearsal manifest; test/compiler packages are not runtime-resolvable | Passed locally |
+| Kubernetes baseline | `kubectl kustomize infrastructure/kubernetes` emitted a complete migration/API/web/worker/network-policy resource set | Passed offline |
+| Production ship gate | Fresh sourced local-environment run emitted `verify: ok`, then `production readiness: FAIL - NODE_ENV must be production` before evidence validation or mutation | Blocked externally |
 | Legal/business/security attestations | Operator reports counsel/policy approval, vendor reviews/DPAs, insurance, and an issue-free independent penetration test; no immutable artifact references are configured | Attested, evidence references pending |
 
 No production release tag exists. `green/EP-009` is the latest genuine graph checkpoint. The externally dependent items are consolidated in `.agent/state/DEFERRED_EXTERNALS.md` and `REMOTE_SESSION_HANDOFF.md`.

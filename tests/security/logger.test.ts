@@ -23,14 +23,24 @@ describe('privacy-safe observability', () => {
     const logger = createPrivacySafeLogger('info', sink);
     logger.info(
       {
-        req: { headers: { authorization: 'Bearer forbidden', cookie: 'session=bad' } },
+        req: {
+          method: 'POST',
+          url: '/v1/auth/password/session',
+          headers: { authorization: 'Bearer forbidden', cookie: 'session=bad' },
+        },
         content: 'private body',
+        deeply: { nested: { secret: 'deeply forbidden', packetContents: 'packet private' } },
+        error: new Error('credential-bearing provider response'),
       },
       'request',
     );
     expect(output).not.toContain('forbidden');
     expect(output).not.toContain('session=bad');
     expect(output).not.toContain('private body');
+    expect(output).not.toContain('deeply forbidden');
+    expect(output).not.toContain('packet private');
+    expect(output).not.toContain('credential-bearing provider response');
+    expect(output).toContain('/v1/auth/password/session');
     expect(output).toContain('[REDACTED]');
   });
   it('bounds metric names and labels to low-cardinality operational data', () => {

@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.build.json && pnpm --filter @tomorrowready/web build",
     "db:migrate": "tsx scripts/migrate.ts",
     "deploy:production": "tsx scripts/deploy-production.ts",
+    "rollback:production": "tsx scripts/rollback-production.ts",
     "format:check": "prettier --check .",
     "lint": "tsx scripts/lint.ts",
     "live-fire": "tsx scripts/live-fire.ts",

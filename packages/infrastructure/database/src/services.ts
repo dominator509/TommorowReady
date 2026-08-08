@@ -10,10 +10,16 @@ import {
 import { Redis } from 'ioredis';
 import nodemailer from 'nodemailer';
 
+function redisClient(url: string, connectTimeout: number): Redis {
+  const client = new Redis(url, { maxRetriesPerRequest: 1, connectTimeout });
+  client.on('error', () => undefined);
+  return client;
+}
+
 export class RealQueue {
   private readonly client: Redis;
   constructor(url: string) {
-    this.client = new Redis(url, { maxRetriesPerRequest: 2, connectTimeout: 5_000 });
+    this.client = redisClient(url, 2_000);
   }
   async roundTrip(value: string): Promise<string | null> {
     const key = `tomorrowready:probe:${randomUUID()}`;
@@ -34,7 +40,11 @@ export class RedisAuthRateLimiter {
     private readonly maximumAttempts = 5,
     private readonly windowSeconds = 900,
   ) {
-    this.client = new Redis(url, { maxRetriesPerRequest: 1, connectTimeout: 3_000 });
+    this.client = redisClient(url, 1_000);
+  }
+
+  async ready(): Promise<void> {
+    await this.client.ping();
   }
 
   async consume(tenantId: string, email: string): Promise<boolean> {
@@ -65,7 +75,10 @@ export class RedisAuthRateLimiter {
 export class RedisSessionRevocationStore {
   private readonly client: Redis;
   constructor(url: string) {
-    this.client = new Redis(url, { maxRetriesPerRequest: 1, connectTimeout: 3_000 });
+    this.client = redisClient(url, 1_000);
+  }
+  async ready(): Promise<void> {
+    await this.client.ping();
   }
   async isRevoked(jti: string): Promise<boolean> {
     return (await this.client.exists(`auth:revoked:${jti}`)) === 1;
@@ -82,7 +95,10 @@ export class RedisSessionRevocationStore {
 export class RedisPasskeyChallengeStore {
   private readonly client: Redis;
   constructor(url: string) {
-    this.client = new Redis(url, { maxRetriesPerRequest: 1, connectTimeout: 3_000 });
+    this.client = redisClient(url, 1_000);
+  }
+  async ready(): Promise<void> {
+    await this.client.ping();
   }
   async put(flowId: string, value: Readonly<Record<string, unknown>>): Promise<void> {
     const result = await this.client.set(
@@ -151,7 +167,7 @@ export class RealJobQueue {
   private readonly deadLetters = 'tomorrowready:jobs-dead-letter:v1';
 
   constructor(url: string) {
-    this.client = new Redis(url, { maxRetriesPerRequest: 2, connectTimeout: 5_000 });
+    this.client = redisClient(url, 2_000);
   }
 
   async ready(): Promise<void> {

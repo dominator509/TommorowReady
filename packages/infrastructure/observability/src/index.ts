@@ -14,6 +14,39 @@ const forbiddenKeys = [
   'cookie',
   'set-cookie',
 ];
+const forbiddenKeySet = new Set(forbiddenKeys.map((key) => key.toLowerCase()));
+
+function safeHttpBoundary(kind: 'req' | 'res', value: unknown): Readonly<Record<string, unknown>> {
+  if (!value || typeof value !== 'object') return {};
+  const source = value as Record<string, unknown>;
+  if (kind === 'res')
+    return typeof source.statusCode === 'number' ? { statusCode: source.statusCode } : {};
+  const output: Record<string, unknown> = {};
+  for (const key of ['id', 'method', 'url', 'hostname', 'ip'] as const) {
+    const candidate = source[key];
+    if (typeof candidate === 'string' && candidate.length <= 2_048) output[key] = candidate;
+  }
+  return output;
+}
+
+function sanitizeLogValue(value: unknown, seen = new WeakSet<object>(), depth = 0): unknown {
+  if (depth > 12) return '[TRUNCATED]';
+  if (value instanceof Error) return { name: value.name, error_code: value.name.toUpperCase() };
+  if (!value || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[CIRCULAR]';
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeLogValue(item, seen, depth + 1));
+  const output: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'req' || key === 'res') output[key] = safeHttpBoundary(key, child);
+    else
+      output[key] = forbiddenKeySet.has(key.toLowerCase())
+        ? '[REDACTED]'
+        : sanitizeLogValue(child, seen, depth + 1);
+  }
+  return output;
+}
+
 export function createPrivacySafeLogger(level = 'info', destination?: DestinationStream): Logger {
   const options = {
     level,
@@ -31,6 +64,14 @@ export function createPrivacySafeLogger(level = 'info', destination?: Destinatio
     },
     base: null,
     messageKey: 'message' as const,
+    hooks: {
+      logMethod(inputArgs: unknown[], method: (...args: unknown[]) => void) {
+        return method.apply(
+          this,
+          inputArgs.map((value) => sanitizeLogValue(value)),
+        );
+      },
+    },
   };
   return destination ? pino(options, destination) : pino(options);
 }

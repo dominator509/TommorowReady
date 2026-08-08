@@ -108,6 +108,25 @@ describe('versioned API contracts', () => {
     });
     await app.close();
   });
+  it('fails readiness closed when a configured Redis authentication dependency is unavailable', async () => {
+    const repository = new PostgresContinuityRepository(process.env.DATABASE_URL!);
+    const app = createApp(repository, {
+      authRateLimiter: {
+        async ready() {
+          throw new Error('REDIS_UNAVAILABLE');
+        },
+        async consume() {
+          return true;
+        },
+        async reset() {},
+      },
+    });
+    const response = await app.inject({ method: 'GET', url: '/health/ready' });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ status: 'unavailable', service: 'api', dependency: 'redis' });
+    await app.close();
+    await repository.close();
+  });
   it('issues password and TOTP-assured sessions with real encrypted identity lookup and rate limiting', async () => {
     const repository = new PostgresContinuityRepository(process.env.DATABASE_URL!);
     const limiter = new RedisAuthRateLimiter(process.env.REDIS_URL!, 2, 60);

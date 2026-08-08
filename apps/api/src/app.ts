@@ -89,10 +89,12 @@ type PasswordIdentityRepository = ContinuityRepository &
     ): Promise<ReleaseState>;
   }>;
 type AuthRateLimiter = Readonly<{
+  ready?(): Promise<void>;
   consume(tenantId: string, email: string): Promise<boolean>;
   reset(tenantId: string, email: string): Promise<void>;
 }>;
 type SessionRevocationStore = Readonly<{
+  ready?(): Promise<void>;
   isRevoked(jti: string): Promise<boolean>;
   revoke(jti: string, expiresAt: number): Promise<void>;
 }>;
@@ -104,6 +106,7 @@ type PasskeyIdentity = Readonly<{
   passkeys: readonly StoredPasskey[];
 }>;
 type PasskeyChallengeStore = Readonly<{
+  ready?(): Promise<void>;
   put(flowId: string, value: Readonly<Record<string, unknown>>): Promise<void>;
   take(flowId: string): Promise<Readonly<Record<string, unknown>> | null>;
 }>;
@@ -262,6 +265,18 @@ export function createApp(
     if (!(await repository.ready())) {
       reply.status(503);
       return { status: 'unavailable', service: 'api', dependency: 'database' };
+    }
+    try {
+      await Promise.all(
+        [
+          options.authRateLimiter?.ready?.(),
+          options.sessionRevocationStore?.ready?.(),
+          options.passkeyChallengeStore?.ready?.(),
+        ].filter((probe): probe is Promise<void> => Boolean(probe)),
+      );
+    } catch {
+      reply.status(503);
+      return { status: 'unavailable', service: 'api', dependency: 'redis' };
     }
     return { status: 'ok', service: 'api' };
   };

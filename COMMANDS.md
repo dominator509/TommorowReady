@@ -29,9 +29,12 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Restore drill: `sh scripts/restore-drill.sh`
 - Container images: `docker build --provenance=false --target api -t tomorrowready-api:local . && docker build --provenance=false --target web -t tomorrowready-web:local . && docker build --provenance=false --target worker -t tomorrowready-worker:local .`
 - Container rehearsal: `sh infrastructure/rehearse-containers.sh`
+- Kubernetes baseline validation: `kubectl kustomize infrastructure/kubernetes`
 - Live-fire: `sh scripts/live-fire.sh`
 - Verify: `sh scripts/verify.sh`
 - Production readiness: `sh scripts/production-readiness-check.sh`
+- Production deployment: `pnpm deploy:production`
+- Production rollback: `pnpm rollback:production`
 - Local infrastructure: `docker compose up -d --wait`
 - Local infrastructure status: `docker compose ps`
 - Local infrastructure logs: `docker compose logs --no-color --tail 200`

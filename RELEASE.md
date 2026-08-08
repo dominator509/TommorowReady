@@ -7,8 +7,8 @@ Use semantic versions. Every release requires clean verify, production readiness
 - Package version: `0.1.0`
 - Release state: engineering candidate only; not staged, released, or deployed
 - Latest genuine green tag: `green/EP-009`
-- Local image digests: API `sha256:a02406d473db46b90d89f6d45d887ea071b036451eae0d96f7f77116fa7dcfdc`; web `sha256:40379c2e3ab55fe0184d5087b7b51acc7f7aea2a55b2c13fe0488d9577467295`; worker `sha256:9f9385ee3e48afeea7b0185c9087eb10550bde306161624155bc615e6ba24866`
-- Local gates: `verify: ok`, `container rehearsal: ok`, `backup: ok`, `restore drill: ok`
-- Ship gate: failed closed on missing qualified-counsel evidence
+- Local image digests: API `sha256:3b4eddb708947222a182bbb951494d5055bc81d18d570b274739132075311793`; web `sha256:51abfab7a521ec0c654dff8472c097049ad49dbe51ab92e4072422b5cec67b01`; worker `sha256:9e5eac162883c3e8d23cdc03e8c1099d2e33996683175dbc453f63189ee3fb10`
+- Local gates: `verify: ok`, `container rehearsal: ok`, `kubernetes baseline: ok`, `runtime dependencies: ok`, `backup: ok`, `restore drill: ok`
+- Ship gate: reran all local gates, then failed closed because the ignored local environment has `NODE_ENV=development`; no production evidence or mutation was credited
 
-Do not create a semantic release tag or publish these local images. Registry provenance, staging evidence, security/privacy approvals, KMS, production infrastructure, and manual authorization must exist first.
+Do not create a semantic release tag or publish these local images. The operator reports completed counsel, vendor/DPA, insurance, and penetration-test reviews, but their immutable release evidence references remain absent. Registry provenance, staging evidence, KMS, production infrastructure, edge configuration, and explicit manual authorization must also exist first.
