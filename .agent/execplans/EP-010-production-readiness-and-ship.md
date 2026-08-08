@@ -80,6 +80,8 @@ Append dated evidence only.
 
 - 2026-08-07: The unchanged production gate executes the entire green local sentinel before failing on the first missing external item. Its observed exit was 1 with `production readiness: FAIL - legal approval evidence missing`.
 - 2026-08-07: All local EP-010 milestones can be committed, but the graph must remain `RESUME EP-010`; external evidence is not a valid `NODE_DONE` substitute.
+- 2026-08-07: Loading the ignored local environment exposed a reproducibility defect: `NODE_ENV=test` reached the Next.js production build and caused `_global-error` prerender failure. Scoping `NODE_ENV=production` to `scripts/build.sh` inside the verifier fixed the build without disabling the deliberately non-production local backup drill.
+- 2026-08-07: The operator attested that counsel/policy review, vendor reviews/DPAs, insurance, and an issue-free independent penetration test are complete. No immutable evidence references were present, so EXT-010 through EXT-013 remain externally unverified.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.
@@ -90,3 +92,4 @@ Complete after verification with files, commands, sentinels, risks, and follow-u
 - Three final local passes emitted `verify: ok`; the last two also emitted `container rehearsal: ok`. Expected readiness/release/handoff files and healthy local dependencies were audited.
 - `REMOTE_SESSION_HANDOFF.md` consolidates every graph node, subsystem, external requirement, probe, validation, legal/business action, known risk, resume command, and operator action.
 - EP-010 is engineering complete but externally unverified. No `NODE_DONE`, `green/EP-010`, semantic release tag, registry push, external mutation, or production deployment is permitted.
+- After the build-environment recovery, a fresh sourced-environment run emitted `verify: ok`; the enclosing ship gate then exited 1 with `production readiness: FAIL - legal approval evidence missing`.

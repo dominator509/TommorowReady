@@ -58,6 +58,7 @@ The ship gate is: clean state -> `sh scripts/verify.sh` -> `sh scripts/productio
 | Backup and restore | `backup: ok`; `restore drill: ok` against an isolated PostgreSQL database | Passed locally |
 | Container release rehearsal | `container rehearsal: ok` on repeated runs; API and web ran non-root and API queried real PostgreSQL | Passed locally |
 | Immutable local images | API `a02406d473db...`; web `40379c2e3ab5...`; worker `9f9385ee3e48...` match the rehearsal manifest | Passed locally |
-| Production ship gate | `production readiness: FAIL - legal approval evidence missing` after a complete green verification | Blocked externally |
+| Production ship gate | Fresh sourced-environment run emitted `verify: ok`, then `production readiness: FAIL - legal approval evidence missing` | Blocked externally |
+| Legal/business/security attestations | Operator reports counsel/policy approval, vendor reviews/DPAs, insurance, and an issue-free independent penetration test; no immutable artifact references are configured | Attested, evidence references pending |
 
 No production release tag exists. `green/EP-009` is the latest genuine graph checkpoint. The externally dependent items are consolidated in `.agent/state/DEFERRED_EXTERNALS.md` and `REMOTE_SESSION_HANDOFF.md`.

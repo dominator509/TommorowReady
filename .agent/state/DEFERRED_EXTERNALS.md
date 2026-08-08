@@ -26,3 +26,7 @@ Status values are `LOCAL_READY`, `IMPLEMENTATION_PENDING`, `DEFERRED`, or `VERIF
 ## Resume rule
 
 Run `sh scripts/external-requirements.sh`, supply only the referenced values through an approved secret manager or ignored `.env`, execute the row's read-only probe, then its validation command. Never change a status to `VERIFIED` from configuration presence alone.
+
+## Operator attestation intake — 2026-08-07
+
+The operator stated that counsel and policy review, vendor reviews/DPAs, insurance, and an independent penetration test are complete and that the penetration testers found no issues. This advances EXT-010 through EXT-013 from "not reported" to **operator-attested, evidence reference pending**; it does not make them `VERIFIED` because no immutable approval/report reference is present in the repository or configured through `LEGAL_APPROVAL_RECORD`, `VENDOR_RISK_APPROVAL_RECORD`, or `INSURANCE_EVIDENCE_RECORD`. EXT-013 likewise has no scoped report identifier or signed disposition record. The exact probes and validation commands in the table remain mandatory.

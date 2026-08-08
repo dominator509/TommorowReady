@@ -11,9 +11,9 @@
 | Graph | EP-000 through EP-009 done; EP-010 engineering gates pass but ship evidence is externally unverified |
 | Engineering completion | 91% by green graph nodes (10 of 11); 100% of locally executable graph engineering and verification is complete |
 | Production release | Blocked; no release tag, registry push, staging deployment, DNS mutation, or production deployment occurred |
-| Why `RUN_COMPLETE` is unavailable | Qualified-counsel approval, vendor and penetration-test evidence, insurance, production KMS/infrastructure/domain/monitoring, authenticated provider probes, staging/rollback evidence, and explicit manual authorization are absent |
+| Why `RUN_COMPLETE` is unavailable | The operator attests that counsel/policy review, vendor reviews/DPAs, insurance, and an issue-free independent penetration test are complete, but their immutable evidence references are absent; production KMS/infrastructure/domain/monitoring, authenticated provider probes, staging/rollback evidence, and explicit configuration authorization are also absent |
 
-The unchanged ship gate ran after a complete green verification and exited 1 with `production readiness: FAIL - legal approval evidence missing`. Nothing converts that failure into approval.
+The ship gate ran after the sourced-environment build path was stabilized, emitted `verify: ok`, and exited 1 with `production readiness: FAIL - legal approval evidence missing`. Nothing converts that failure into approval.
 
 ## Subsystem status
 
@@ -31,7 +31,7 @@ The unchanged ship gate ran after a complete green verification and exited 1 wit
 | Observability and operations | Green locally | Redacted structured logs, bounded metrics, alert/runbook mapping, fail-closed readiness | Production sink, alert delivery, incident exercises | SLOs/RPO/RTO not production-evidenced |
 | Testing | Green locally | 27 unit/security, 8 integration/contract, 3 E2E, 3 browser tests, LF-01–LF-14 | Provider sandbox and staging live-fire | External effects not live-tested |
 | Deployment and rollback | Green locally | Stable non-root images, health checks, immutable rehearsal digests, repeated container rehearsal | Registry, platform overlay, staging deploy/rollback, DNS/TLS/WAF | Kubernetes file is a local-rehearsal baseline only |
-| Legal, privacy, and business | Technical mechanisms only | Draft policies, consent/privacy request records, retention boundaries, deferred inventory | Counsel, entity/contact text, vendor review, insurance, publication | Production launch prohibited |
+| Legal, privacy, and business | Operator-attested; artifacts pending | Draft policies, consent/privacy request records, retention boundaries, deferred inventory; operator reports completed counsel, vendor/DPA, insurance, and penetration-test reviews | Immutable approval/report references, approved entity/contact text, publication evidence | Production launch remains prohibited until evidence probes pass |
 
 ## Graph status
 
@@ -72,7 +72,7 @@ The unchanged ship gate ran after a complete green verification and exited 1 wit
 | EXT-017 | Optional media/transcription/print vendors | None | Select only approved vendors with restricted scopes | `git grep -n "transcription\|print fulfillment" BLUEPRINT_INPUT.md SUBPROCESSOR_REGISTER.md` | `sh scripts/live-fire.sh` plus provider contract/live probe | Optional derivatives/fulfillment | No if disabled |
 | EXT-018 | Legal entity, privacy contact, jurisdiction, policy publication | None | Counsel-approved entity/address/contact text and publication records | `git grep -n "must be inserted\|requires counsel" PRIVACY_POLICY_DRAFT.md TERMS_OF_SERVICE_DRAFT.md` | `sh scripts/production-readiness-check.sh` | Notices, rights, contracts | Yes |
 
-The authoritative detailed inventory is `.agent/state/DEFERRED_EXTERNALS.md`. Never change `DEFERRED` to `VERIFIED` from configuration presence alone.
+The authoritative detailed inventory is `.agent/state/DEFERRED_EXTERNALS.md`. On 2026-08-07 the operator attested that EXT-010 through EXT-013 are complete, including no penetration-test findings. No matching artifact or configured immutable reference was found, so these rows remain `DEFERRED`; never change a row to `VERIFIED` from an attestation or configuration presence alone.
 
 ## Commands to resume
 
@@ -116,11 +116,11 @@ Provider-specific deploy, pause, image-rollback, and reconciliation commands can
 
 ## Legal and business actions
 
-1. Obtain qualified-counsel approval for every named policy, DPIA conclusion, child/dependent treatment, emergency-access design, jurisdiction, and publication text.
+1. Attach immutable references for the operator-reported counsel approvals to `LEGAL_APPROVAL_RECORD`, covering every named policy, DPIA conclusion, child/dependent treatment, emergency-access design, jurisdiction, and publication text.
 2. Insert the approved legal entity, address, privacy contact, support contact, governing jurisdiction, and effective dates; publish versioned policies and retain publication evidence.
-3. Complete vendor risk, DPA, transfer, retention, training, data-residency, and subprocessor review for every enabled vendor.
-4. Obtain active cyber and E&O insurance evidence.
-5. Commission the independent penetration test and threat-model review; resolve or formally disposition every finding.
+3. Attach the completed vendor/DPA review record to `VENDOR_RISK_APPROVAL_RECORD`, including transfer, retention, training, data-residency, and subprocessor scope for every enabled vendor.
+4. Attach the active cyber and E&O policy evidence reference to `INSURANCE_EVIDENCE_RECORD`.
+5. Attach the scoped independent penetration-test report identifier and signed no-findings disposition record.
 6. Approve the production platform, regions, domain, DNS/TLS/CDN/WAF configuration, backup policy, KMS key, monitoring sink, and incident contacts.
 7. Grant manual deployment authorization only after the production-readiness script and human evidence review pass.
 
@@ -128,7 +128,7 @@ Provider-specific deploy, pause, image-rollback, and reconciliation commands can
 
 - No production provider, registry, cloud, edge, KMS, monitoring, alert, backup, staging, or rollback behavior has been verified.
 - Local live-fire proves protocol-compatible services, not provider-specific delivery, lifecycle, billing, AI, or regional semantics.
-- Legal documents remain drafts and may contain placeholders; no counsel, regulatory, rights, guardian, copyright, voice/likeness, or business authority is implied.
+- Legal documents remain drafts and may contain placeholders. The operator reports completed counsel and related reviews, but no immutable references currently prove their scope, currency, publication, regulatory, rights, guardian, copyright, voice/likeness, or business authority.
 - The Kubernetes manifest deliberately defaults network traffic to deny and requires a reviewed platform allowlist overlay; applying it alone is not a production deployment.
 - The worker image is built and non-root, but production queue throughput and provider-backed job execution require staging evidence.
 - SLO, RPO, RTO, incident-response, regional failover, and production data-deletion claims remain unproven.
@@ -136,7 +136,7 @@ Provider-specific deploy, pause, image-rollback, and reconciliation commands can
 ## Final operator checklist
 
 1. Select EXT-015's production platform and regions; provide staging-only roles first and add exact provider commands through ADR review.
-2. Complete EXT-010, EXT-011, EXT-012, EXT-013, and EXT-018 evidence before enabling any provider or public route.
+2. Supply immutable references for the operator-attested EXT-010, EXT-011, EXT-012, and EXT-013 approvals/reports, and complete EXT-018 approved entity/contact/publication evidence before enabling any provider or public route.
 3. Provision staging database, Valkey, private storage, KMS, monitoring, alerting, backup, and edge controls; run every row's probe and validation.
 4. Push newly rebuilt images to the approved registry with signed provenance; replace local digests with registry-qualified digests.
 5. Deploy staging manually; execute migrations, smoke, E2E subset, provider probes, incident exercise, backup/restore, and image rollback.
