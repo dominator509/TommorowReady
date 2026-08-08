@@ -85,3 +85,6 @@
 2026-08-08T04:31:53Z | codex | EP-010 | RECOVERY_PASS | sourced environment verify: ok after NODE_ENV production was scoped to build subprocess
 2026-08-08T04:31:53Z | codex | EP-010 | EXTERNAL_DEFERRED | ship gate exit 1 signature LEGAL_APPROVAL_EVIDENCE_MISSING; operator attestation received but immutable EXT-010 through EXT-013 evidence references absent; platform KMS domain monitoring staging rollback and configured authorization also remain deferred
 2026-08-08T04:31:53Z | codex | EP-010 | HEARTBEAT | attestation intake and ship-gate recovery ready for scope audit and commit
+2026-08-08T04:38:21Z | codex | EP-010 | DIAGNOSTIC_FAIL | prepublish formatter exit 1 signature PRETTIER_NO_PARSER_GITIGNORE hypothesis gitignore is not covered by repository Prettier parsers; format TypeScript only and validate ignore rules with git check-ignore
+2026-08-08T04:38:21Z | codex | EP-010 | DIAGNOSTIC_FAIL | gitleaks availability exit 1 signature PROGRAM_NOT_FOUND hypothesis optional external scanner is not installed; use hardened repository scanner across tracked files and Git history
+2026-08-08T04:39:56Z | codex | EP-010 | SECURITY_PASS | prepublish scan: ok across 182 tracked files and Git history; representative secret key state credential and backup paths ignored
