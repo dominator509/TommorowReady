@@ -8,6 +8,7 @@ import {
 } from '../../packages/infrastructure/database/src/index.js';
 import {
   RedisAuthRateLimiter,
+  RealJobQueue,
   RedisPasskeyChallengeStore,
   RedisSessionRevocationStore,
 } from '../../packages/infrastructure/database/src/services.js';
@@ -52,6 +53,141 @@ describe('versioned API contracts', () => {
     expect(packets.json()).toHaveLength(1);
     expect(packets.json()[0].payload).toMatchObject({ purpose: 'estate continuity', recipientId });
     await app.close();
+    await repository.close();
+  });
+  it('verifies a recipient and lets only a stepped-up owner test and arm an optional monitor', async () => {
+    const repository = new PostgresContinuityRepository(process.env.DATABASE_URL!);
+    const queue = new RealJobQueue(process.env.REDIS_URL!);
+    const owner = await repository.bootstrapOwner({
+      email: `continuity-owner-${crypto.randomUUID()}@example.invalid`,
+      passwordHash: await hashPassword('continuity test password with sufficient length'),
+      householdName: 'Continuity Contract Household',
+    });
+    let recipientVerificationMessage = '';
+    const app = createApp(repository, {
+      continuityNotifier: {
+        async send(_to, _subject, text) {
+          recipientVerificationMessage = text;
+        },
+      },
+      continuityBaseUrl: 'http://127.0.0.1:3000',
+      jobScheduler: queue,
+      continuityAutomationEnabled: true,
+    });
+    const ownerHeaders = sessionHeaders({
+      tenantId: owner.tenantId,
+      householdId: owner.householdId,
+      actorId: owner.userId,
+      role: 'owner',
+      assurance: 'mfa',
+      purpose: 'continuity contract proof',
+    });
+    const item = await app.inject({
+      method: 'POST',
+      url: '/v1/people',
+      headers: ownerHeaders,
+      payload: { name: 'Packet Item', relationship: 'household' },
+    });
+    const recipientId = crypto.randomUUID();
+    const packet = await app.inject({
+      method: 'POST',
+      url: '/v1/packets',
+      headers: ownerHeaders,
+      payload: {
+        purpose: 'owner-authorized continuity',
+        recipientId,
+        itemIds: [item.json().id],
+      },
+    });
+    expect(packet.statusCode).toBe(201);
+    const verification = await app.inject({
+      method: 'POST',
+      url: '/v1/continuity-monitors/recipient-verifications',
+      headers: ownerHeaders,
+      payload: { recipientId, email: 'verified-recipient@example.invalid' },
+    });
+    expect(verification.statusCode).toBe(202);
+    const link = /http:\/\/[^\s]+/.exec(recipientVerificationMessage)?.[0];
+    expect(link).toEqual(expect.any(String));
+    const verificationUrl = new URL(link!);
+    const completed = await app.inject({
+      method: 'POST',
+      url: '/v1/continuity-monitors/recipient-verifications/complete',
+      payload: {
+        tenantId: verificationUrl.searchParams.get('tenantId'),
+        householdId: verificationUrl.searchParams.get('householdId'),
+        profileId: verificationUrl.searchParams.get('profileId'),
+        token: verificationUrl.searchParams.get('token'),
+      },
+    });
+    expect(completed.statusCode).toBe(204);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/continuity-monitors',
+      headers: ownerHeaders,
+      payload: {
+        packetId: packet.json().packetId,
+        recipientId,
+        checkInIntervalDays: 30,
+        reminderOffsetsHours: [0, 24, 72],
+        gracePeriodHours: 168,
+        releaseDelayHours: 24,
+        digitalDelivery: true,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().payload.state).toBe('DISABLED');
+    const monitorId = created.json().id as string;
+    const passwordOnly = await app.inject({
+      method: 'POST',
+      url: `/v1/continuity-monitors/${monitorId}/actions`,
+      headers: sessionHeaders({
+        tenantId: owner.tenantId,
+        householdId: owner.householdId,
+        actorId: owner.userId,
+        assurance: 'password',
+      }),
+      payload: { action: 'ARM' },
+    });
+    expect(passwordOnly.statusCode).toBe(403);
+    expect(passwordOnly.json().code).toBe('STEP_UP_REQUIRED');
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/v1/continuity-monitors/${monitorId}/actions`,
+          headers: ownerHeaders,
+          payload: { action: 'TEST' },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const armed = await app.inject({
+      method: 'POST',
+      url: `/v1/continuity-monitors/${monitorId}/actions`,
+      headers: ownerHeaders,
+      payload: { action: 'ARM' },
+    });
+    expect(armed.statusCode).toBe(200);
+    expect(armed.json()).toMatchObject({ state: 'ARMED', nextActionAt: expect.any(String) });
+    const disabledMail = await app.inject({
+      method: 'POST',
+      url: '/v1/continuity-monitors/postal-addresses',
+      headers: ownerHeaders,
+      payload: {
+        recipientId,
+        provider: 'lob',
+        name: 'Recipient',
+        addressLine1: '1 Example Way',
+        city: 'Example',
+        state: 'CA',
+        postalCode: '94107',
+        countryCode: 'US',
+      },
+    });
+    expect(disabledMail.statusCode).toBe(503);
+    expect(disabledMail.json().code).toBe('PHYSICAL_MAIL_PROVIDER_DISABLED');
+    await app.close();
+    await queue.close();
     await repository.close();
   });
   it('returns the locked safe error envelope when context is absent', async () => {

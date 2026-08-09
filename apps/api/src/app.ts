@@ -3,7 +3,7 @@ import Fastify, {
   type FastifyInstance,
   type FastifyRequest,
 } from 'fastify';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   ContinuityService,
   type ContinuityRepository,
@@ -11,6 +11,8 @@ import {
 } from '../../../packages/application/src/index.js';
 import {
   accessRequestInput,
+  continuityMonitorActionInput,
+  continuityMonitorInput,
   errorEnvelope,
   householdInput,
   packetInput,
@@ -20,8 +22,12 @@ import {
   passwordRecoveryRequestInput,
   passwordSessionInput,
   payloadInput,
+  postalAddressInput,
   recordInput,
   releaseTransitionInput,
+  releaseRedemptionInput,
+  recipientVerificationCompleteInput,
+  recipientVerificationRequestInput,
   sessionClaims,
 } from '../../../packages/contracts/src/index.js';
 import { DomainError, type ReleaseState } from '../../../packages/domain/src/index.js';
@@ -47,6 +53,18 @@ import {
   verifyStripeWebhook,
   type VerifiedBillingEvent,
 } from '../../../packages/infrastructure/billing/src/index.js';
+import {
+  PhysicalMailError,
+  type PhysicalMailProvider,
+  type VerifiedPhysicalMailEvent,
+} from '../../../packages/infrastructure/physical-mail/src/index.js';
+import type { ContinuityMonitorConfiguration } from '../../../packages/infrastructure/database/src/index.js';
+import type {
+  DurableJob,
+  RealJobQueue,
+  RealObjectStorage,
+  RedisPhysicalMailRouter,
+} from '../../../packages/infrastructure/database/src/services.js';
 
 type AuthenticatedContext = RequestContext & Readonly<{ authorization: AuthorizationContext }>;
 type PasswordIdentityRepository = ContinuityRepository &
@@ -87,6 +105,46 @@ type PasswordIdentityRepository = ContinuityRepository &
       next: ReleaseState,
       idempotencyKey: string,
     ): Promise<ReleaseState>;
+    createRecipientVerification(
+      context: RequestContext & { householdId: string },
+      recipientId: string,
+      email: string,
+    ): Promise<Readonly<{ profileId: string; token: string; email: string; expiresAt: string }>>;
+    completeRecipientVerification(input: {
+      tenantId: string;
+      householdId: string;
+      profileId: string;
+      token: string;
+    }): Promise<void>;
+    saveVerifiedPostalAddress(
+      context: RequestContext & { householdId: string },
+      recipientId: string,
+      address: Awaited<ReturnType<PhysicalMailProvider['verifyAddress']>>,
+    ): Promise<string>;
+    createContinuityMonitor(
+      context: RequestContext & { householdId: string },
+      input: ContinuityMonitorConfiguration,
+    ): Promise<Readonly<{ id: string; payload: Readonly<Record<string, unknown>> }>>;
+    markContinuityMonitorTested(
+      context: RequestContext & { householdId: string },
+      monitorId: string,
+    ): Promise<void>;
+    applyContinuityMonitorAction(
+      context: RequestContext & { householdId: string },
+      monitorId: string,
+      action: 'ARM' | 'CHECK_IN' | 'SNOOZE' | 'CANCEL' | 'DENY',
+      snoozeHours?: number,
+    ): Promise<Readonly<{ state: string; nextActionAt: string }>>;
+    redeemReleaseArtifact(input: {
+      tenantId: string;
+      householdId: string;
+      tokenId: string;
+      token: string;
+    }): Promise<Readonly<{ objectId: string; checksumSha256: string; mediaType: string }>>;
+    processPhysicalMailEvent(
+      context: RequestContext & { householdId: string },
+      event: VerifiedPhysicalMailEvent,
+    ): Promise<'processed' | 'duplicate'>;
   }>;
 type AuthRateLimiter = Readonly<{
   ready?(): Promise<void>;
@@ -113,6 +171,9 @@ type PasskeyChallengeStore = Readonly<{
 type RecoveryNotifier = Readonly<{
   send(to: string, subject: string, text: string): Promise<unknown>;
 }>;
+type JobScheduler = Pick<RealJobQueue, 'schedule'>;
+type PacketStorage = Pick<RealObjectStorage, 'getPrivate'>;
+type PhysicalMailRouter = Pick<RedisPhysicalMailRouter, 'ready' | 'get'>;
 
 function context(request: FastifyRequest, sessionSecret: string): AuthenticatedContext {
   const authorization = request.headers.authorization;
@@ -164,6 +225,17 @@ function requireHouseholdAuthorization(
     throw new DomainError('AUTHORIZATION_DENIED', 'The authenticated session is not authorized.');
 }
 
+function requireOwnerStepUp(authenticated: AuthenticatedContext): void {
+  if (
+    authenticated.authorization.role !== 'owner' ||
+    authenticated.authorization.assurance === 'password'
+  )
+    throw new DomainError(
+      'STEP_UP_REQUIRED',
+      'Owner multi-factor or passkey authentication is required.',
+    );
+}
+
 export function createApp(
   repository: PasswordIdentityRepository,
   options: Readonly<{
@@ -176,6 +248,13 @@ export function createApp(
     recoveryNotifier?: RecoveryNotifier;
     recoveryBaseUrl?: string;
     stripeWebhookSecret?: string;
+    continuityNotifier?: RecoveryNotifier;
+    continuityBaseUrl?: string;
+    jobScheduler?: JobScheduler;
+    packetStorage?: PacketStorage;
+    physicalMailProviders?: Readonly<Partial<Record<'lob' | 'postgrid', PhysicalMailProvider>>>;
+    physicalMailRouter?: PhysicalMailRouter;
+    continuityAutomationEnabled?: boolean;
   }> = {},
 ): FastifyInstance {
   const sessionSecret = options.sessionSecret ?? process.env.SESSION_SECRET;
@@ -220,7 +299,7 @@ export function createApp(
   app.setErrorHandler((error: unknown, request, reply) => {
     const safeError = error instanceof Error ? error : new Error('Unknown error');
     const code =
-      safeError instanceof DomainError
+      safeError instanceof DomainError || safeError instanceof PhysicalMailError
         ? safeError.code
         : safeError.name === 'ZodError'
           ? 'VALIDATION_FAILED'
@@ -228,27 +307,33 @@ export function createApp(
     const status =
       code === 'INTERNAL_ERROR'
         ? 500
-        : code === 'AUTHENTICATION_REQUIRED'
+        : ['AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED'].includes(code)
           ? 401
-          : code === 'AUTHENTICATION_FAILED'
+          : [
+                'BILLING_WEBHOOK_SIGNATURE_INVALID',
+                'PHYSICAL_MAIL_WEBHOOK_SIGNATURE_INVALID',
+              ].includes(code)
             ? 401
-            : code === 'AUTH_RATE_LIMITED'
-              ? 429
-              : code === 'AUTH_SERVICE_UNAVAILABLE'
-                ? 503
-                : code === 'BILLING_PROVIDER_DISABLED'
+            : ['AUTHORIZATION_DENIED', 'STEP_UP_REQUIRED'].includes(code)
+              ? 403
+              : code === 'AUTH_RATE_LIMITED'
+                ? 429
+                : [
+                      'AUTH_SERVICE_UNAVAILABLE',
+                      'BILLING_PROVIDER_DISABLED',
+                      'PHYSICAL_MAIL_PROVIDER_DISABLED',
+                      'CONTINUITY_AUTOMATION_DISABLED',
+                    ].includes(code)
                   ? 503
-                  : code === 'BILLING_WEBHOOK_SIGNATURE_INVALID'
-                    ? 401
-                    : code === 'AUTHORIZATION_DENIED'
-                      ? 403
-                      : code === 'SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED'
-                        ? 409
-                        : code === 'RELEASE_POLICY_UNSATISFIED'
-                          ? 409
-                          : code === 'PROHIBITED_SECRET'
-                            ? 422
-                            : 400;
+                  : [
+                        'SERVER_VERIFIED_RELEASE_EVIDENCE_REQUIRED',
+                        'RELEASE_POLICY_UNSATISFIED',
+                        'PHYSICAL_MAIL_ROUTE_MISSING',
+                      ].includes(code)
+                    ? 409
+                    : code === 'PROHIBITED_SECRET'
+                      ? 422
+                      : 400;
     void reply
       .status(status)
       .send(
@@ -272,6 +357,7 @@ export function createApp(
           options.authRateLimiter?.ready?.(),
           options.sessionRevocationStore?.ready?.(),
           options.passkeyChallengeStore?.ready?.(),
+          options.physicalMailRouter?.ready?.(),
         ].filter((probe): probe is Promise<void> => Boolean(probe)),
       );
     } catch {
@@ -547,6 +633,65 @@ export function createApp(
     const result = await repository.processBillingEvent(event);
     return reply.status(result === 'processed' ? 202 : 200).send({ status: result });
   });
+  app.post('/v1/continuity-monitors/recipient-verifications/complete', async (request, reply) => {
+    const input = recipientVerificationCompleteInput.parse(request.body);
+    await repository.completeRecipientVerification(input);
+    return reply.status(204).send();
+  });
+  app.post('/v1/releases/redeem', async (request, reply) => {
+    if (!options.packetStorage)
+      throw new DomainError('RELEASE_STORAGE_UNAVAILABLE', 'Release storage is unavailable.');
+    const input = releaseRedemptionInput.parse(request.body);
+    const artifact = await repository.redeemReleaseArtifact(input);
+    const bytes = await options.packetStorage.getPrivate({
+      tenantId: input.tenantId,
+      householdId: input.householdId,
+      objectId: artifact.objectId,
+    });
+    if (createHash('sha256').update(bytes).digest('hex') !== artifact.checksumSha256)
+      throw new Error('RELEASE_ARTIFACT_CHECKSUM_MISMATCH');
+    return reply
+      .type(artifact.mediaType)
+      .header('content-disposition', 'attachment; filename="tomorrowready-packet.pdf"')
+      .header('cache-control', 'no-store')
+      .send(bytes);
+  });
+  app.post('/v1/physical-mail/webhooks/:provider', async (request, reply) => {
+    const providerName = (request.params as { provider: string }).provider;
+    if (providerName !== 'lob' && providerName !== 'postgrid')
+      throw new DomainError('PHYSICAL_MAIL_PROVIDER_INVALID', 'Physical mail provider is invalid.');
+    const provider = options.physicalMailProviders?.[providerName];
+    if (!provider || !options.physicalMailRouter)
+      throw new DomainError(
+        'PHYSICAL_MAIL_PROVIDER_DISABLED',
+        'Physical mail provider is not configured.',
+      );
+    const rawBody = (request as FastifyRequest & { rawBody?: string }).rawBody;
+    if (rawBody === undefined)
+      throw new DomainError(
+        'PHYSICAL_MAIL_WEBHOOK_SIGNATURE_INVALID',
+        'Physical mail webhook authentication failed.',
+      );
+    const event = provider.verifyWebhook(
+      request.headers as Readonly<Record<string, string | string[] | undefined>>,
+      Buffer.from(rawBody),
+    );
+    const route = await options.physicalMailRouter.get(providerName, event.providerOrderId);
+    if (!route)
+      throw new DomainError(
+        'PHYSICAL_MAIL_ROUTE_MISSING',
+        'Physical mail event cannot yet be reconciled.',
+      );
+    const result = await repository.processPhysicalMailEvent(
+      {
+        ...route,
+        actorId: '00000000-0000-4000-8000-000000000000',
+        purpose: 'authenticated physical mail webhook',
+      },
+      event,
+    );
+    return reply.status(result === 'processed' ? 202 : 200).send({ status: result });
+  });
   app.post('/v1/households', async (request, reply) => {
     const input = householdInput.parse(request.body);
     const authenticated = context(request, sessionSecret);
@@ -581,6 +726,152 @@ export function createApp(
     const authenticated = context(request, sessionSecret);
     requireHouseholdAuthorization(authenticated, 'read:packet', 'packet');
     return repository.list(authenticated, 'packet');
+  });
+  app.post('/v1/continuity-monitors/recipient-verifications', async (request, reply) => {
+    if (!options.continuityNotifier || !options.continuityBaseUrl)
+      throw new DomainError(
+        'AUTH_SERVICE_UNAVAILABLE',
+        'Recipient verification is temporarily unavailable.',
+      );
+    const authenticated = context(request, sessionSecret);
+    requireOwnerStepUp(authenticated);
+    if (!authenticated.householdId)
+      throw new DomainError('HOUSEHOLD_CONTEXT_REQUIRED', 'Household context is required.');
+    const input = recipientVerificationRequestInput.parse(request.body);
+    const verification = await repository.createRecipientVerification(
+      { ...authenticated, householdId: authenticated.householdId },
+      input.recipientId,
+      input.email,
+    );
+    const url = new URL('/recipient/verify', options.continuityBaseUrl);
+    url.search = new URLSearchParams({
+      tenantId: authenticated.tenantId,
+      householdId: authenticated.householdId,
+      profileId: verification.profileId,
+      token: verification.token,
+    }).toString();
+    try {
+      await options.continuityNotifier.send(
+        verification.email,
+        'Verify your TomorrowReady packet delivery address',
+        `Confirm this delivery address within 48 hours: ${url.toString()}`,
+      );
+    } catch {
+      throw new DomainError(
+        'RECIPIENT_VERIFICATION_NOTIFICATION_FAILED',
+        'The verification notice could not be sent.',
+      );
+    }
+    return reply
+      .status(202)
+      .send({ status: 'verification_sent', expiresAt: verification.expiresAt });
+  });
+  app.post('/v1/continuity-monitors/postal-addresses', async (request, reply) => {
+    const authenticated = context(request, sessionSecret);
+    requireOwnerStepUp(authenticated);
+    if (!authenticated.householdId)
+      throw new DomainError('HOUSEHOLD_CONTEXT_REQUIRED', 'Household context is required.');
+    const input = postalAddressInput.parse(request.body);
+    const provider = options.physicalMailProviders?.[input.provider];
+    if (!provider)
+      throw new DomainError(
+        'PHYSICAL_MAIL_PROVIDER_DISABLED',
+        'Physical mail provider is not configured.',
+      );
+    const verified = await provider.verifyAddress({
+      name: input.name,
+      addressLine1: input.addressLine1,
+      ...(input.addressLine2 ? { addressLine2: input.addressLine2 } : {}),
+      city: input.city,
+      state: input.state,
+      postalCode: input.postalCode,
+      countryCode: input.countryCode,
+    });
+    const id = await repository.saveVerifiedPostalAddress(
+      { ...authenticated, householdId: authenticated.householdId },
+      input.recipientId,
+      verified,
+    );
+    return reply
+      .status(201)
+      .send({ id, provider: verified.provider, verifiedAt: verified.verifiedAt });
+  });
+  app.post('/v1/continuity-monitors', async (request, reply) => {
+    const authenticated = context(request, sessionSecret);
+    requireOwnerStepUp(authenticated);
+    if (!authenticated.householdId)
+      throw new DomainError('HOUSEHOLD_CONTEXT_REQUIRED', 'Household context is required.');
+    const input = continuityMonitorInput.parse(request.body);
+    const { physicalMail, ...monitorInput } = input;
+    const monitor = await repository.createContinuityMonitor(
+      { ...authenticated, householdId: authenticated.householdId },
+      { ...monitorInput, ...(physicalMail ? { physicalMail } : {}) },
+    );
+    return reply.status(201).send(monitor);
+  });
+  app.get('/v1/continuity-monitors', async (request) => {
+    const authenticated = context(request, sessionSecret);
+    requireHouseholdAuthorization(authenticated, 'read:continuityMonitor', 'continuityMonitor');
+    return repository.list(authenticated, 'continuityMonitor');
+  });
+  app.post('/v1/continuity-monitors/:monitorId/actions', async (request, reply) => {
+    const authenticated = context(request, sessionSecret);
+    if (!authenticated.householdId)
+      throw new DomainError('HOUSEHOLD_CONTEXT_REQUIRED', 'Household context is required.');
+    const input = continuityMonitorActionInput.parse(request.body);
+    if (['TEST', 'ARM', 'CANCEL', 'DENY'].includes(input.action)) requireOwnerStepUp(authenticated);
+    else if (authenticated.authorization.role !== 'owner')
+      throw new DomainError('AUTHORIZATION_DENIED', 'The authenticated session is not authorized.');
+    const monitorId = (request.params as { monitorId: string }).monitorId;
+    if (input.action === 'ARM' && !options.continuityAutomationEnabled)
+      throw new DomainError(
+        'CONTINUITY_AUTOMATION_DISABLED',
+        'Continuity automation is paused by the global safety switch.',
+      );
+    if (input.action === 'TEST') {
+      if (!options.continuityNotifier)
+        throw new DomainError(
+          'AUTH_SERVICE_UNAVAILABLE',
+          'Continuity notifications are unavailable.',
+        );
+      const monitor = await repository.get(authenticated, 'continuityMonitor', monitorId);
+      const monitorPayload = monitor?.payload;
+      const ownerEmail = monitorPayload?.ownerEmail;
+      if (typeof ownerEmail !== 'string')
+        throw new DomainError('CONTINUITY_MONITOR_NOT_FOUND', 'Continuity monitor not found.');
+      await options.continuityNotifier.send(
+        ownerEmail,
+        'TomorrowReady continuity monitor test',
+        'Your continuity monitor test succeeded. No packet was released.',
+      );
+      await repository.markContinuityMonitorTested(
+        { ...authenticated, householdId: authenticated.householdId },
+        monitorId,
+      );
+      return reply.send({ state: monitorPayload?.state, tested: true });
+    }
+    const result = await repository.applyContinuityMonitorAction(
+      { ...authenticated, householdId: authenticated.householdId },
+      monitorId,
+      input.action,
+      input.snoozeHours,
+    );
+    if (
+      options.jobScheduler &&
+      ['ARM', 'CHECK_IN', 'SNOOZE'].includes(input.action) &&
+      ['ARMED', 'SNOOZED'].includes(result.state)
+    ) {
+      const job: DurableJob = {
+        id: randomUUID(),
+        tenantId: authenticated.tenantId,
+        householdId: authenticated.householdId,
+        type: 'continuity-monitor',
+        resourceId: monitorId,
+        idempotencyKey: `continuity:${monitorId}:${result.nextActionAt}`,
+      };
+      await options.jobScheduler.schedule(job, new Date(result.nextActionAt));
+    }
+    return reply.send(result);
   });
   app.post('/v1/access-requests', async (request, reply) => {
     const input = accessRequestInput.parse(request.body);

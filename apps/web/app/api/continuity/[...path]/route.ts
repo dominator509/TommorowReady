@@ -30,6 +30,9 @@ const allowed = new Set([
   'recipients',
   'emergency-policies',
   'access-requests',
+  'continuity-monitors',
+  'continuity-monitors/recipient-verifications',
+  'continuity-monitors/postal-addresses',
   'annual-reviews',
   'consents',
   'exports',
@@ -38,7 +41,8 @@ const allowed = new Set([
 
 async function forward(request: Request, segments: string[], method: 'GET' | 'POST') {
   const path = segments.join('/');
-  if (!allowed.has(path))
+  const monitorAction = /^continuity-monitors\/[0-9a-f-]{36}\/actions$/i.test(path);
+  if (!allowed.has(path) && !monitorAction)
     return NextResponse.json(
       { code: 'ROUTE_NOT_ALLOWED', message: 'Route is not available.' },
       { status: 404 },

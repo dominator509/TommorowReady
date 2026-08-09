@@ -60,3 +60,29 @@ export function renderDeterministicBinder(input: {
     manifestHash: input.manifestHash,
   };
 }
+
+const escapeHtml = (value: string): string =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
+export function renderDeterministicMailHtml(input: {
+  title: string;
+  manifestHash: string;
+  sections: readonly string[];
+}): Readonly<{ html: string; checksum: string }> {
+  const html = [
+    '<!doctype html><html><head><meta charset="utf-8"><style>',
+    '@page{size:letter;margin:0.75in}body{font-family:Arial,sans-serif;color:#17231d}',
+    'h1{font-size:22px}p{font-size:12px;line-height:1.45;white-space:pre-wrap}',
+    '</style></head><body>',
+    `<h1>${escapeHtml(input.title)}</h1>`,
+    `<p>Manifest: ${escapeHtml(input.manifestHash)}</p>`,
+    ...input.sections.map((section) => `<p>${escapeHtml(section)}</p>`),
+    '</body></html>',
+  ].join('');
+  return { html, checksum: createHash('sha256').update(html).digest('hex') };
+}

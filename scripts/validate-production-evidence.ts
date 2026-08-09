@@ -87,6 +87,39 @@ productionUrl('REDIS_URL', ['rediss:'], true);
 productionUrl('S3_ENDPOINT', ['https:']);
 productionUrl('SMTP_URL', ['smtps:'], true);
 required('KMS_KEY_ID');
+const continuityAutomation = required('CONTINUITY_AUTOMATION_ENABLED');
+if (!['yes', 'no'].includes(continuityAutomation))
+  throw new Error('CONTINUITY_AUTOMATION_ENABLED_INVALID');
+
+function requireCompleteOptionalGroup(names: readonly string[], code: string): boolean {
+  const values = names.map((name) => process.env[name]?.trim() ?? '');
+  if (values.some(Boolean) && !values.every(Boolean)) throw new Error(`${code}_INCOMPLETE`);
+  return values.every(Boolean);
+}
+
+const lobConfigured = requireCompleteOptionalGroup(
+  ['LOB_API_KEY', 'LOB_WEBHOOK_SECRET'],
+  'LOB_CONFIGURATION',
+);
+const postgridConfigured = requireCompleteOptionalGroup(
+  ['POSTGRID_API_KEY', 'POSTGRID_WEBHOOK_SECRET', 'POSTGRID_RETURN_CONTACT_ID'],
+  'POSTGRID_CONFIGURATION',
+);
+if (lobConfigured && Buffer.byteLength(required('LOB_WEBHOOK_SECRET'), 'utf8') < 32)
+  throw new Error('LOB_WEBHOOK_SECRET_INVALID');
+if (postgridConfigured && Buffer.byteLength(required('POSTGRID_WEBHOOK_SECRET'), 'utf8') < 32)
+  throw new Error('POSTGRID_WEBHOOK_SECRET_INVALID');
+if (lobConfigured || postgridConfigured) {
+  for (const name of [
+    'PHYSICAL_MAIL_FROM_NAME',
+    'PHYSICAL_MAIL_FROM_ADDRESS_LINE1',
+    'PHYSICAL_MAIL_FROM_CITY',
+    'PHYSICAL_MAIL_FROM_STATE',
+    'PHYSICAL_MAIL_FROM_POSTAL_CODE',
+    'PHYSICAL_MAIL_FROM_COUNTRY_CODE',
+  ] as const)
+    required(name);
+}
 
 for (const name of [
   'POSTGRES_APP_PASSWORD',

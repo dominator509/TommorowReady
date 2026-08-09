@@ -16,6 +16,7 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Format source: `pnpm exec prettier --write .`
 - Restore scope drift: `git restore -- <explicit-paths>`
 - Stage reviewed scope while preserving pre-existing unrelated changes: `git add -- <explicit-paths>`
+- Create an explicitly reviewed feature directory: `mkdir -p <explicit-path>`
 - Typecheck: `sh scripts/typecheck.sh`
 - Unit: `sh scripts/test-unit.sh`
 - Integration: `sh scripts/test-integration.sh`
@@ -47,6 +48,8 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Local owner bootstrap: `pnpm exec tsx scripts/bootstrap-local-owner.ts` (writes ignored mode-0600 credentials to `.agent/state/local-credentials/owner.json`; never prints secrets)
 - Load local environment: `set -a; . ./.env; set +a`
 - External requirements inventory: `sh scripts/external-requirements.sh`
+- Lob authenticated read-only probe: `sh scripts/probes/lob_api_key.sh`
+- PostGrid authenticated read-only probe: `sh scripts/probes/postgrid_api_key.sh`
 - Local start: `pnpm start > .agent/state/local.log 2>&1 & echo $! > .agent/state/local.pid; i=0; until curl -fsS http://127.0.0.1:4000/health/ready >/dev/null; do i=$((i+1)); [ "$i" -lt 30 ] || exit 1; sleep 2; done`
 - Local stop: `test ! -f .agent/state/local.pid || kill "$(cat .agent/state/local.pid)"; docker compose down`
 - Database migration: `pnpm db:migrate`

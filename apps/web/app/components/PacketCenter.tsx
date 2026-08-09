@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { responseMessage, StatusNotice, type UiStatus } from './StatusNotice';
+import { ContinuityMonitorCenter } from './ContinuityMonitorCenter';
 
 type StoredRecord = Readonly<{ id?: string; payload?: Readonly<Record<string, unknown>> }>;
 const text = (value: unknown, fallback = 'Not configured'): string =>
@@ -112,11 +113,13 @@ export function PacketCenter() {
         </div>
       )}
       <section className="notice" aria-labelledby="emergency-policy-heading">
-        <h2 id="emergency-policy-heading">Emergency release is never automatic</h2>
+        <h2 id="emergency-policy-heading">Emergency release stays policy controlled</h2>
         <p>
           Every request moves through identity verification, scope matching, a challenge period,
           owner denial checks, expiry, and policy approval. Conflicting or unavailable evidence
-          requires manual review. TomorrowReady does not determine legal death or incapacity.
+          fails closed. An optional owner-armed continuity monitor can automate only a preselected
+          packet after missed check-ins, repeated notices, grace, and a final deterministic safety
+          evaluation. TomorrowReady does not determine legal death or incapacity.
         </p>
         {requests.length ? (
           <ul className="record-list">
@@ -131,6 +134,7 @@ export function PacketCenter() {
           <p>No release requests are active.</p>
         )}
       </section>
+      <ContinuityMonitorCenter />
     </>
   );
 }

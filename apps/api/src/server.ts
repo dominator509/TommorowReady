@@ -3,10 +3,14 @@ import { createApp } from './app.js';
 import { PostgresContinuityRepository } from '../../../packages/infrastructure/database/src/index.js';
 import {
   RedisAuthRateLimiter,
+  RedisPhysicalMailRouter,
   RedisPasskeyChallengeStore,
   RedisSessionRevocationStore,
   RealEmail,
+  RealJobQueue,
+  RealObjectStorage,
 } from '../../../packages/infrastructure/database/src/services.js';
+import { configuredPhysicalMailProviders } from '../../../packages/infrastructure/physical-mail/src/index.js';
 
 try {
   loadEnvFile('.env');
@@ -20,6 +24,21 @@ const authRateLimiter = new RedisAuthRateLimiter(redisUrl);
 const sessionRevocationStore = new RedisSessionRevocationStore(redisUrl);
 const passkeyChallengeStore = new RedisPasskeyChallengeStore(redisUrl);
 const recoveryNotifier = process.env.SMTP_URL ? new RealEmail(process.env.SMTP_URL) : undefined;
+const jobScheduler = new RealJobQueue(redisUrl);
+const physicalMailRouter = new RedisPhysicalMailRouter(
+  redisUrl,
+  process.env.AUTH_LOOKUP_SECRET ?? '',
+);
+const packetStorage = new RealObjectStorage(
+  process.env.S3_BUCKET ?? '',
+  process.env.S3_ENDPOINT ?? '',
+  process.env.S3_ACCESS_KEY_ID ?? '',
+  process.env.S3_SECRET_ACCESS_KEY ?? '',
+);
+const physicalMailProviders = configuredPhysicalMailProviders();
+const continuityAutomationSetting = process.env.CONTINUITY_AUTOMATION_ENABLED ?? 'no';
+if (!['yes', 'no'].includes(continuityAutomationSetting))
+  throw new Error('CONTINUITY_AUTOMATION_ENABLED_INVALID');
 const app = createApp(repository, {
   authRateLimiter,
   sessionRevocationStore,
@@ -36,12 +55,22 @@ const app = createApp(repository, {
   ...(process.env.STRIPE_WEBHOOK_SECRET
     ? { stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET }
     : {}),
+  ...(recoveryNotifier && process.env.APP_BASE_URL
+    ? { continuityNotifier: recoveryNotifier, continuityBaseUrl: process.env.APP_BASE_URL }
+    : {}),
+  jobScheduler,
+  packetStorage,
+  physicalMailProviders,
+  physicalMailRouter,
+  continuityAutomationEnabled: continuityAutomationSetting === 'yes',
 });
 const close = async () => {
   await app.close();
   await authRateLimiter.close();
   await sessionRevocationStore.close();
   await passkeyChallengeStore.close();
+  await jobScheduler.close();
+  await physicalMailRouter.close();
   await repository.close();
 };
 process.on('SIGINT', () => {

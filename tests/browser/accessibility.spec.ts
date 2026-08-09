@@ -46,7 +46,15 @@ test('guided plan is keyboard-reachable and preserves the safety boundary', asyn
   expect(results.violations).toEqual([]);
 });
 
-for (const route of ['/sign-in', '/recover', '/settings/security', '/packets', '/privacy']) {
+for (const route of [
+  '/sign-in',
+  '/recover',
+  '/settings/security',
+  '/packets',
+  '/privacy',
+  '/recipient/verify',
+  '/recipient/release',
+]) {
   test(`${route} exposes labelled controls without serious accessibility violations`, async ({
     page,
   }) => {

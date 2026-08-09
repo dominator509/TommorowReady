@@ -4,6 +4,7 @@
 .agent/state/local-credentials/
 node_modules/
 .next/
+.next-dev/
 dist/
 coverage/
 playwright-report/

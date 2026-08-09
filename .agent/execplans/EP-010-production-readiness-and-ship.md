@@ -115,7 +115,7 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 - [x] M2 complete with evidence and commit.
 - [x] M3 complete with evidence and commit.
 - [x] M4 complete with evidence and commit.
-- [ ] M5 pending.
+- [x] M5 complete with evidence and commit.
 - [ ] M6 pending.
 
 # 12. Surprises & Discoveries
@@ -129,6 +129,9 @@ Append dated evidence only.
   release and approved an optional dead-man switch plus automatic digital and physical-mail
   delivery. The override does not authorize AI release decisions, whole-household disclosure by
   default, secret storage, unverified recipients, ambiguous provider success, or production deploy.
+- 2026-08-09: Repeated verification exposed Next.js development and production builds sharing one
+  artifact directory. Phase-aware `.next-dev` isolation made build-then-browser and the aggregate
+  verification order deterministic without weakening browser coverage or production CSP.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.

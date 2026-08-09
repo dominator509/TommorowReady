@@ -142,6 +142,33 @@ describe('real local services', () => {
     expect(await queue.deadLetterLength()).toBe(before + 1);
     await queue.close();
   });
+  it('replaces an obsolete continuity deadline and promotes only the latest scheduled job', async () => {
+    const queue = new RealJobQueue(required('REDIS_URL'));
+    const scope = {
+      tenantId: crypto.randomUUID(),
+      householdId: crypto.randomUUID(),
+      type: 'continuity-monitor' as const,
+      resourceId: crypto.randomUUID(),
+    };
+    const obsolete = {
+      ...scope,
+      id: crypto.randomUUID(),
+      idempotencyKey: crypto.randomUUID(),
+    };
+    const current = {
+      ...scope,
+      id: crypto.randomUUID(),
+      idempotencyKey: crypto.randomUUID(),
+    };
+    await queue.schedule(obsolete, new Date(Date.now() - 2_000));
+    await queue.schedule(current, new Date(Date.now() - 1_000));
+    expect(await queue.promoteDue()).toBe(true);
+    const claimed = await queue.claim(`scheduled-${crypto.randomUUID()}`);
+    expect(claimed?.job).toEqual(current);
+    await queue.acknowledge(claimed!.streamId);
+    expect(await queue.promoteDue()).toBe(false);
+    await queue.close();
+  });
   it('round-trips a private object through real S3-compatible storage', async () => {
     const storage = new RealObjectStorage(
       required('S3_BUCKET'),
@@ -161,7 +188,14 @@ describe('real local services', () => {
     expect(await storage.getPrivate(scope)).toEqual(body);
     await expect(
       storage.putImmutable({ ...scope, body, contentType: 'text/plain' }),
-    ).rejects.toThrow('IMMUTABLE_OBJECT_ALREADY_EXISTS');
+    ).resolves.toEqual(expect.objectContaining({ checksumSha256: expect.any(String) }));
+    await expect(
+      storage.putImmutable({
+        ...scope,
+        body: Buffer.from('different immutable content'),
+        contentType: 'text/plain',
+      }),
+    ).rejects.toThrow('IMMUTABLE_OBJECT_ALREADY_EXISTS_WITH_DIFFERENT_CONTENT');
     await expect(
       storage.getPrivate({ ...scope, householdId: crypto.randomUUID() }),
     ).rejects.toThrow();

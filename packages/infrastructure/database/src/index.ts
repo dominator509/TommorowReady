@@ -10,11 +10,22 @@ import type {
   StoredRecord,
 } from '../../../application/src/index.js';
 import {
+  advanceContinuityMonitor,
+  assertSafeContent,
   DomainError,
+  ownerContinuityMonitorAction,
   transitionRelease,
+  validateContinuityMonitorPolicy,
+  type ContinuityMonitorPolicy,
+  type ContinuityMonitorSnapshot,
+  type ContinuityMonitorState,
   type PacketManifest,
   type ReleaseState,
 } from '../../../domain/src/index.js';
+import type {
+  VerifiedPhysicalMailEvent,
+  VerifiedPostalAddress,
+} from '../../physical-mail/src/index.js';
 import {
   assertFieldEncryptionKey,
   decryptRestricted,
@@ -209,7 +220,122 @@ const kindTable: Readonly<Record<string, string>> = {
   denial: 'denials',
   releaseAuthorization: 'release_authorizations',
   releasedPacket: 'released_packets',
+  continuityMonitor: 'continuity_monitors',
+  recipientDeliveryProfile: 'recipient_delivery_profiles',
+  recipientPostalAddress: 'recipient_postal_addresses',
+  releaseArtifact: 'release_artifacts',
+  physicalMailOrder: 'physical_mail_orders',
 };
+
+export type ContinuityMonitorConfiguration = Readonly<{
+  packetId: string;
+  recipientId: string;
+  checkInIntervalDays: number;
+  reminderOffsetsHours: readonly number[];
+  gracePeriodHours: number;
+  releaseDelayHours: number;
+  digitalDelivery: boolean;
+  physicalMail?: Readonly<{
+    addressId: string;
+    provider: 'lob' | 'postgrid';
+    mode: 'SECURE_ACCESS_LETTER' | 'SELECTED_INSTRUCTIONS' | 'FULL_ELIGIBLE_PACKET';
+    service: 'FIRST_CLASS' | 'CERTIFIED' | 'CERTIFIED_RETURN_RECEIPT' | 'REGISTERED';
+  }>;
+}>;
+
+export type DueContinuityMonitorAction = Readonly<{
+  monitorId: string;
+  tenantId: string;
+  householdId: string;
+  effect:
+    | 'OWNER_CHECK_IN_DUE'
+    | 'OWNER_REMINDER'
+    | 'OWNER_GRACE_NOTICE'
+    | 'RELEASE_PACKET'
+    | 'SECURITY_LOCK';
+  ownerEmail: string;
+}>;
+
+export type AutomaticReleaseDelivery = Readonly<{
+  monitorId: string;
+  tenantId: string;
+  householdId: string;
+  accessRequestId: string;
+  recipientEmail?: string;
+  recipientId: string;
+  packetId: string;
+  manifestHash: string;
+  householdName: string;
+  sections: readonly string[];
+  physicalMail?: Readonly<{
+    address: VerifiedPostalAddress;
+    provider: 'lob' | 'postgrid';
+    mode: 'SECURE_ACCESS_LETTER' | 'SELECTED_INSTRUCTIONS' | 'FULL_ELIGIBLE_PACKET';
+    service: 'FIRST_CLASS' | 'CERTIFIED' | 'CERTIFIED_RETURN_RECEIPT' | 'REGISTERED';
+  }>;
+}>;
+
+type StoredContinuityMonitor = Readonly<{
+  state: ContinuityMonitorState;
+  policy: ContinuityMonitorPolicy;
+  packetId: string;
+  recipientId: string;
+  manifestId: string;
+  manifestHash: string;
+  ownerEmail: string;
+  recipientProfileId?: string;
+  postalAddressId?: string;
+  physicalMail?: ContinuityMonitorConfiguration['physicalMail'];
+  nextActionAt: string;
+  cycleDueAt: string;
+  reminderIndex: number;
+  lastTestedAt?: string;
+  notificationsHealthy: boolean;
+  ownerDenied: boolean;
+  takeoverSignal: boolean;
+  accessRequestId?: string;
+}>;
+
+function monitorSnapshot(payload: StoredContinuityMonitor): ContinuityMonitorSnapshot {
+  return {
+    state: payload.state,
+    policy: payload.policy,
+    nextActionAt: new Date(payload.nextActionAt),
+    cycleDueAt: new Date(payload.cycleDueAt),
+    reminderIndex: payload.reminderIndex,
+  };
+}
+
+function monitorMetadata(payload: StoredContinuityMonitor): Readonly<Record<string, string>> {
+  return {
+    state: payload.state,
+    nextActionEpochMs: String(new Date(payload.nextActionAt).getTime()),
+    recipientId: payload.recipientId,
+    manifestId: payload.manifestId,
+  };
+}
+
+const printablePacketTables = [
+  'people',
+  'dependents',
+  'children',
+  'pets',
+  'professional_contacts',
+  'emergency_contacts',
+  'account_locators',
+  'assets',
+  'debts',
+  'insurance_records',
+  'properties',
+  'storage_units',
+  'document_locations',
+  'confirmed_facts',
+  'playbooks',
+  'funeral_wishes',
+  'letters',
+  'advice_items',
+  'recipes',
+] as const;
 
 export class PostgresContinuityRepository implements ContinuityRepository {
   readonly pool: Pool;
@@ -943,6 +1069,1155 @@ export class PostgresContinuityRepository implements ContinuityRepository {
         createHash('sha256').update(`${idempotencyKey}:${result.state}`).digest('hex'),
       );
     return result.state;
+  }
+
+  async createRecipientVerification(
+    context: RequestContext & { householdId: string },
+    recipientId: string,
+    email: string,
+  ): Promise<Readonly<{ profileId: string; token: string; email: string; expiresAt: string }>> {
+    const profileId = randomUUID();
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + 48 * 3_600_000).toISOString();
+    const normalizedEmail = email.trim().toLowerCase();
+    const tokenHash = this.recoveryHash(context.tenantId, profileId, token);
+    await this.transaction(context, async (client) => {
+      const payload = encryptPayload(
+        'recipient_delivery_profiles',
+        profileId,
+        context.tenantId,
+        context.householdId,
+        { recipientId, email: normalizedEmail, status: 'PENDING', expiresAt },
+        this.fieldEncryptionKey,
+        { recipientId, status: 'PENDING', tokenHash },
+      );
+      await client.query(
+        'INSERT INTO recipient_delivery_profiles (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+        [profileId, context.tenantId, context.householdId, payload],
+      );
+    });
+    await this.appendAudit(
+      context,
+      'continuity-monitor:recipient-verification-requested',
+      profileId,
+      createHash('sha256').update(recipientId).digest('hex'),
+    );
+    return { profileId, token, email: normalizedEmail, expiresAt };
+  }
+
+  async completeRecipientVerification(input: {
+    tenantId: string;
+    householdId: string;
+    profileId: string;
+    token: string;
+  }): Promise<void> {
+    const context: RequestContext & { householdId: string } = {
+      tenantId: input.tenantId,
+      householdId: input.householdId,
+      actorId: input.profileId,
+      purpose: 'recipient delivery verification',
+    };
+    await this.transaction(context, async (client) => {
+      const result = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM recipient_delivery_profiles WHERE id=$1 FOR UPDATE',
+        [input.profileId],
+      );
+      const row = result.rows[0];
+      if (!row)
+        throw new DomainError(
+          'RECIPIENT_VERIFICATION_INVALID',
+          'Verification is invalid or expired.',
+        );
+      const payload = decryptPayload('recipient_delivery_profiles', row, this.fieldEncryptionKey);
+      const storedHash = (row.payload as Record<string, unknown>).tokenHash;
+      const suppliedHash = this.recoveryHash(input.tenantId, input.profileId, input.token);
+      if (
+        typeof storedHash !== 'string' ||
+        storedHash.length !== suppliedHash.length ||
+        !timingSafeEqual(Buffer.from(storedHash), Buffer.from(suppliedHash)) ||
+        typeof payload.expiresAt !== 'string' ||
+        new Date(payload.expiresAt).getTime() < Date.now() ||
+        payload.status !== 'PENDING'
+      )
+        throw new DomainError(
+          'RECIPIENT_VERIFICATION_INVALID',
+          'Verification is invalid or expired.',
+        );
+      const verifiedAt = new Date().toISOString();
+      const updated = encryptPayload(
+        'recipient_delivery_profiles',
+        input.profileId,
+        input.tenantId,
+        input.householdId,
+        { ...payload, status: 'VERIFIED', verifiedAt },
+        this.fieldEncryptionKey,
+        { recipientId: String(payload.recipientId), status: 'VERIFIED' },
+      );
+      await client.query(
+        'UPDATE recipient_delivery_profiles SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [updated, input.profileId],
+      );
+    });
+    await this.appendAudit(
+      context,
+      'continuity-monitor:recipient-verified',
+      input.profileId,
+      createHash('sha256').update(input.profileId).digest('hex'),
+    );
+  }
+
+  async saveVerifiedPostalAddress(
+    context: RequestContext & { householdId: string },
+    recipientId: string,
+    address: VerifiedPostalAddress,
+  ): Promise<string> {
+    const id = randomUUID();
+    await this.transaction(context, async (client) => {
+      const payload = encryptPayload(
+        'recipient_postal_addresses',
+        id,
+        context.tenantId,
+        context.householdId,
+        { recipientId, ...address },
+        this.fieldEncryptionKey,
+        {
+          recipientId,
+          provider: address.provider,
+          verificationEpochMs: String(new Date(address.verifiedAt).getTime()),
+        },
+      );
+      await client.query(
+        'INSERT INTO recipient_postal_addresses (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+        [id, context.tenantId, context.householdId, payload],
+      );
+    });
+    await this.appendAudit(
+      context,
+      'continuity-monitor:postal-address-verified',
+      id,
+      createHash('sha256').update(address.providerAddressId).digest('hex'),
+    );
+    return id;
+  }
+
+  async createContinuityMonitor(
+    context: RequestContext & { householdId: string },
+    input: ContinuityMonitorConfiguration,
+  ): Promise<StoredRecord> {
+    const policy: ContinuityMonitorPolicy = {
+      checkInIntervalDays: input.checkInIntervalDays,
+      reminderOffsetsHours: [...input.reminderOffsetsHours],
+      gracePeriodHours: input.gracePeriodHours,
+      releaseDelayHours: input.releaseDelayHours,
+      digitalDelivery: input.digitalDelivery,
+      ...(input.physicalMail ? { physicalMailMode: input.physicalMail.mode } : {}),
+    };
+    validateContinuityMonitorPolicy(policy);
+    const id = randomUUID();
+    const now = new Date();
+    const stored = await this.transaction(context, async (client) => {
+      const manifests = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM packet_manifests WHERE household_id=$1',
+        [context.householdId],
+      );
+      const manifestRow = manifests.rows.find((row) => {
+        const candidate = decryptPayload('packet_manifests', row, this.fieldEncryptionKey);
+        return candidate.packetId === input.packetId && candidate.recipientId === input.recipientId;
+      });
+      if (!manifestRow)
+        throw new DomainError(
+          'PACKET_MANIFEST_NOT_FOUND',
+          'An approved recipient-scoped packet is required.',
+        );
+      const manifest = decryptPayload('packet_manifests', manifestRow, this.fieldEncryptionKey);
+      const identityResult = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM identities WHERE payload->>'userId'=$1 LIMIT 1",
+        [context.actorId],
+      );
+      const identityRow = identityResult.rows[0];
+      const identity = identityRow
+        ? decryptPayload('identities', identityRow, this.fieldEncryptionKey)
+        : {};
+      if (typeof identity.email !== 'string')
+        throw new DomainError(
+          'OWNER_NOTIFICATION_REQUIRED',
+          'An owner notification address is required.',
+        );
+      let recipientProfileId: string | undefined;
+      if (input.digitalDelivery) {
+        const profiles = await client.query(
+          "SELECT id FROM recipient_delivery_profiles WHERE payload->>'recipientId'=$1 AND payload->>'status'='VERIFIED' ORDER BY updated_at DESC LIMIT 1",
+          [input.recipientId],
+        );
+        recipientProfileId = profiles.rows[0]?.id as string | undefined;
+        if (!recipientProfileId)
+          throw new DomainError('RECIPIENT_NOT_VERIFIED', 'The recipient email must be verified.');
+      }
+      let postalAddressId: string | undefined;
+      if (input.physicalMail) {
+        const address = await client.query(
+          "SELECT id FROM recipient_postal_addresses WHERE id=$1 AND payload->>'recipientId'=$2 AND payload->>'provider'=$3",
+          [input.physicalMail.addressId, input.recipientId, input.physicalMail.provider],
+        );
+        postalAddressId = address.rows[0]?.id as string | undefined;
+        if (!postalAddressId)
+          throw new DomainError(
+            'POSTAL_ADDRESS_NOT_VERIFIED',
+            'A verified postal address is required.',
+          );
+      }
+      const monitor: StoredContinuityMonitor = {
+        state: 'DISABLED',
+        policy,
+        packetId: input.packetId,
+        recipientId: input.recipientId,
+        manifestId: manifestRow.id,
+        manifestHash: String(manifest.hash),
+        ownerEmail: identity.email,
+        ...(recipientProfileId ? { recipientProfileId } : {}),
+        ...(postalAddressId ? { postalAddressId } : {}),
+        ...(input.physicalMail ? { physicalMail: input.physicalMail } : {}),
+        nextActionAt: now.toISOString(),
+        cycleDueAt: now.toISOString(),
+        reminderIndex: 0,
+        notificationsHealthy: true,
+        ownerDenied: false,
+        takeoverSignal: false,
+      };
+      const encrypted = encryptPayload(
+        'continuity_monitors',
+        id,
+        context.tenantId,
+        context.householdId,
+        monitor,
+        this.fieldEncryptionKey,
+        monitorMetadata(monitor),
+      );
+      await client.query(
+        'INSERT INTO continuity_monitors (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+        [id, context.tenantId, context.householdId, encrypted],
+      );
+      return {
+        id,
+        tenantId: context.tenantId,
+        householdId: context.householdId,
+        kind: 'continuityMonitor',
+        payload: monitor,
+        version: 1,
+      } as const;
+    });
+    await this.appendAudit(
+      context,
+      'continuity-monitor:created-disabled',
+      id,
+      createHash('sha256').update(`${input.packetId}:${input.recipientId}`).digest('hex'),
+    );
+    return stored;
+  }
+
+  async markContinuityMonitorTested(
+    context: RequestContext & { householdId: string },
+    monitorId: string,
+  ): Promise<void> {
+    const testedAt = new Date().toISOString();
+    await this.transaction(context, async (client) => {
+      const result = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM continuity_monitors WHERE id=$1 FOR UPDATE',
+        [monitorId],
+      );
+      const row = result.rows[0];
+      if (!row)
+        throw new DomainError('CONTINUITY_MONITOR_NOT_FOUND', 'Continuity monitor not found.');
+      const monitor = decryptPayload(
+        'continuity_monitors',
+        row,
+        this.fieldEncryptionKey,
+      ) as StoredContinuityMonitor;
+      const updated = { ...monitor, lastTestedAt: testedAt, notificationsHealthy: true };
+      await client.query(
+        'UPDATE continuity_monitors SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [
+          encryptPayload(
+            'continuity_monitors',
+            monitorId,
+            context.tenantId,
+            context.householdId,
+            updated,
+            this.fieldEncryptionKey,
+            monitorMetadata(updated),
+          ),
+          monitorId,
+        ],
+      );
+    });
+    await this.appendAudit(
+      context,
+      'continuity-monitor:test-passed',
+      monitorId,
+      createHash('sha256').update(testedAt).digest('hex'),
+    );
+  }
+
+  async applyContinuityMonitorAction(
+    context: RequestContext & { householdId: string },
+    monitorId: string,
+    action: 'ARM' | 'CHECK_IN' | 'SNOOZE' | 'CANCEL' | 'DENY',
+    snoozeHours?: number,
+  ): Promise<Readonly<{ state: ContinuityMonitorState; nextActionAt: string }>> {
+    const now = new Date();
+    const result = await this.transaction(context, async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `continuity-monitor:${context.tenantId}:${monitorId}`,
+      ]);
+      const selected = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM continuity_monitors WHERE id=$1 FOR UPDATE',
+        [monitorId],
+      );
+      const row = selected.rows[0];
+      if (!row)
+        throw new DomainError('CONTINUITY_MONITOR_NOT_FOUND', 'Continuity monitor not found.');
+      const monitor = decryptPayload(
+        'continuity_monitors',
+        row,
+        this.fieldEncryptionKey,
+      ) as StoredContinuityMonitor;
+      const recentSuccessfulTest =
+        typeof monitor.lastTestedAt === 'string' &&
+        now.getTime() - new Date(monitor.lastTestedAt).getTime() <= 365 * 86_400_000;
+      const next = ownerContinuityMonitorAction(monitorSnapshot(monitor), action, now, {
+        recentSuccessfulTest,
+        ...(snoozeHours === undefined ? {} : { snoozeHours }),
+      });
+      const updated: StoredContinuityMonitor = {
+        ...monitor,
+        state: next.state,
+        nextActionAt: next.nextActionAt.toISOString(),
+        cycleDueAt: next.cycleDueAt.toISOString(),
+        reminderIndex: next.reminderIndex,
+        ownerDenied: action === 'DENY' ? true : monitor.ownerDenied,
+      };
+      await client.query(
+        'UPDATE continuity_monitors SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [
+          encryptPayload(
+            'continuity_monitors',
+            monitorId,
+            context.tenantId,
+            context.householdId,
+            updated,
+            this.fieldEncryptionKey,
+            monitorMetadata(updated),
+          ),
+          monitorId,
+        ],
+      );
+      return { state: next.state, nextActionAt: next.nextActionAt.toISOString() } as const;
+    });
+    await this.appendAudit(
+      context,
+      `continuity-monitor:${action.toLowerCase()}`,
+      monitorId,
+      createHash('sha256').update(`${action}:${result.nextActionAt}`).digest('hex'),
+    );
+    return result;
+  }
+
+  async advanceContinuityMonitorForJob(
+    context: RequestContext & { householdId: string },
+    monitorId: string,
+    now = new Date(),
+  ): Promise<
+    Readonly<{
+      state: ContinuityMonitorState;
+      effect: DueContinuityMonitorAction['effect'] | 'NONE';
+      nextActionAt: string;
+      ownerEmail: string;
+    }>
+  > {
+    return this.transaction(context, async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `continuity-monitor:${context.tenantId}:${monitorId}`,
+      ]);
+      const selected = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM continuity_monitors WHERE id=$1 FOR UPDATE',
+        [monitorId],
+      );
+      const row = selected.rows[0];
+      if (!row)
+        throw new DomainError('CONTINUITY_MONITOR_NOT_FOUND', 'Continuity monitor not found.');
+      const monitor = decryptPayload(
+        'continuity_monitors',
+        row,
+        this.fieldEncryptionKey,
+      ) as StoredContinuityMonitor;
+      const manifestResult = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM packet_manifests WHERE id=$1',
+        [monitor.manifestId],
+      );
+      const manifestRow = manifestResult.rows[0];
+      const manifest = manifestRow
+        ? decryptPayload('packet_manifests', manifestRow, this.fieldEncryptionKey)
+        : {};
+      let recipientVerified = !monitor.policy.digitalDelivery;
+      if (monitor.recipientProfileId) {
+        const profileResult = await client.query(
+          'SELECT id, tenant_id, household_id, payload FROM recipient_delivery_profiles WHERE id=$1',
+          [monitor.recipientProfileId],
+        );
+        const profile = profileResult.rows[0]
+          ? decryptPayload(
+              'recipient_delivery_profiles',
+              profileResult.rows[0],
+              this.fieldEncryptionKey,
+            )
+          : {};
+        recipientVerified =
+          profile.status === 'VERIFIED' &&
+          typeof profile.verifiedAt === 'string' &&
+          now.getTime() - new Date(profile.verifiedAt).getTime() <= 365 * 86_400_000;
+      }
+      let addressVerified = !monitor.physicalMail;
+      if (monitor.postalAddressId) {
+        const addressResult = await client.query(
+          'SELECT id, tenant_id, household_id, payload FROM recipient_postal_addresses WHERE id=$1',
+          [monitor.postalAddressId],
+        );
+        const address = addressResult.rows[0]
+          ? decryptPayload(
+              'recipient_postal_addresses',
+              addressResult.rows[0],
+              this.fieldEncryptionKey,
+            )
+          : {};
+        addressVerified =
+          typeof address.verifiedAt === 'string' &&
+          now.getTime() - new Date(address.verifiedAt).getTime() <= 365 * 86_400_000;
+      }
+      const decision = advanceContinuityMonitor(
+        monitorSnapshot(monitor),
+        {
+          recipientVerified,
+          manifestCurrent:
+            manifest.hash === monitor.manifestHash &&
+            manifest.packetId === monitor.packetId &&
+            manifest.recipientId === monitor.recipientId,
+          recentSuccessfulTest:
+            typeof monitor.lastTestedAt === 'string' &&
+            now.getTime() - new Date(monitor.lastTestedAt).getTime() <= 365 * 86_400_000,
+          notificationsHealthy: monitor.notificationsHealthy,
+          ownerDenied: monitor.ownerDenied,
+          takeoverSignal: monitor.takeoverSignal,
+          addressVerified,
+        },
+        now,
+      );
+      const updated: StoredContinuityMonitor = {
+        ...monitor,
+        state: decision.state,
+        nextActionAt: decision.nextActionAt.toISOString(),
+        cycleDueAt: decision.cycleDueAt.toISOString(),
+        reminderIndex: decision.reminderIndex,
+      };
+      await client.query(
+        'UPDATE continuity_monitors SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [
+          encryptPayload(
+            'continuity_monitors',
+            monitorId,
+            context.tenantId,
+            context.householdId,
+            updated,
+            this.fieldEncryptionKey,
+            monitorMetadata(updated),
+          ),
+          monitorId,
+        ],
+      );
+      return {
+        state: decision.state,
+        effect: decision.effect,
+        nextActionAt: decision.nextActionAt.toISOString(),
+        ownerEmail: monitor.ownerEmail,
+      };
+    });
+  }
+
+  async markContinuityMonitorNotificationFailure(
+    context: RequestContext & { householdId: string },
+    monitorId: string,
+  ): Promise<void> {
+    await this.transaction(context, async (client) => {
+      const selected = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM continuity_monitors WHERE id=$1 FOR UPDATE',
+        [monitorId],
+      );
+      const row = selected.rows[0];
+      if (!row) return;
+      const monitor = decryptPayload(
+        'continuity_monitors',
+        row,
+        this.fieldEncryptionKey,
+      ) as StoredContinuityMonitor;
+      if (['AUTOMATICALLY_RELEASED', 'CANCELLED', 'OWNER_DENIED'].includes(monitor.state)) return;
+      const updated: StoredContinuityMonitor = {
+        ...monitor,
+        state: 'SECURITY_LOCKED',
+        notificationsHealthy: false,
+        nextActionAt: new Date().toISOString(),
+      };
+      await client.query(
+        'UPDATE continuity_monitors SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [
+          encryptPayload(
+            'continuity_monitors',
+            monitorId,
+            context.tenantId,
+            context.householdId,
+            updated,
+            this.fieldEncryptionKey,
+            monitorMetadata(updated),
+          ),
+          monitorId,
+        ],
+      );
+    });
+    await this.appendAudit(
+      context,
+      'continuity-monitor:notification-failure-locked',
+      monitorId,
+      createHash('sha256').update(monitorId).digest('hex'),
+    );
+  }
+
+  async prepareAutomaticRelease(
+    context: RequestContext & { householdId: string },
+    monitorId: string,
+  ): Promise<AutomaticReleaseDelivery> {
+    const prepared = await this.transaction(context, async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `continuity-release:${context.tenantId}:${monitorId}`,
+      ]);
+      const selected = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM continuity_monitors WHERE id=$1 FOR UPDATE',
+        [monitorId],
+      );
+      const row = selected.rows[0];
+      if (!row)
+        throw new DomainError('CONTINUITY_MONITOR_NOT_FOUND', 'Continuity monitor not found.');
+      let monitor = decryptPayload(
+        'continuity_monitors',
+        row,
+        this.fieldEncryptionKey,
+      ) as StoredContinuityMonitor;
+      if (monitor.state !== 'RELEASE_PENDING' && monitor.state !== 'AUTOMATICALLY_RELEASED')
+        throw new DomainError('RELEASE_POLICY_UNSATISFIED', 'Automatic release is not pending.');
+      let accessRequestId = monitor.accessRequestId;
+      if (!accessRequestId) {
+        accessRequestId = randomUUID();
+        const requestPayload = encryptPayload(
+          'access_requests',
+          accessRequestId,
+          context.tenantId,
+          context.householdId,
+          {
+            packetId: monitor.packetId,
+            recipientId: monitor.recipientId,
+            purpose: 'owner-configured continuity monitor',
+            state: 'REQUESTED',
+            source: 'CONTINUITY_MONITOR',
+            monitorId,
+          },
+          this.fieldEncryptionKey,
+        );
+        await client.query(
+          'INSERT INTO access_requests (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+          [accessRequestId, context.tenantId, context.householdId, requestPayload],
+        );
+        const evidenceId = randomUUID();
+        await client.query(
+          'INSERT INTO verification_evidence (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+          [
+            evidenceId,
+            context.tenantId,
+            context.householdId,
+            encryptPayload(
+              'verification_evidence',
+              evidenceId,
+              context.tenantId,
+              context.householdId,
+              {
+                recipientVerified: true,
+                packetScopeMatches: true,
+                verificationSatisfied: true,
+                providerAmbiguous: false,
+                takeoverSignal: false,
+                providerReference: monitor.recipientProfileId ?? monitor.postalAddressId,
+                source: 'PREVERIFIED_CONTINUITY_MONITOR',
+              },
+              this.fieldEncryptionKey,
+              { accessRequestId },
+            ),
+          ],
+        );
+        const challengeId = randomUUID();
+        const endsAt = new Date(Date.now() - 1_000).toISOString();
+        await client.query(
+          'INSERT INTO challenges (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+          [
+            challengeId,
+            context.tenantId,
+            context.householdId,
+            encryptPayload(
+              'challenges',
+              challengeId,
+              context.tenantId,
+              context.householdId,
+              { accessRequestId, endsAt, source: 'CONTINUITY_MONITOR_GRACE' },
+              this.fieldEncryptionKey,
+              { accessRequestId },
+            ),
+          ],
+        );
+        monitor = { ...monitor, accessRequestId };
+        await client.query(
+          'UPDATE continuity_monitors SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+          [
+            encryptPayload(
+              'continuity_monitors',
+              monitorId,
+              context.tenantId,
+              context.householdId,
+              monitor,
+              this.fieldEncryptionKey,
+              monitorMetadata(monitor),
+            ),
+            monitorId,
+          ],
+        );
+      }
+      return { monitor, accessRequestId } as const;
+    });
+
+    const currentResult = await this.get(context, 'accessRequest', prepared.accessRequestId);
+    let state = currentResult?.payload.state as ReleaseState;
+    const sequence: readonly ReleaseState[] = [
+      'VERIFYING',
+      'CHALLENGE_ACTIVE',
+      'APPROVED_FOR_RELEASE',
+      'RELEASED',
+    ];
+    for (const next of sequence) {
+      if (state === 'RELEASED') break;
+      const currentIndex = ['REQUESTED', ...sequence].indexOf(state);
+      const nextIndex = ['REQUESTED', ...sequence].indexOf(next);
+      if (nextIndex !== currentIndex + 1) continue;
+      state = await this.transitionReleaseRequest(
+        context,
+        prepared.accessRequestId,
+        next,
+        `continuity:${monitorId}:${next}`,
+      );
+    }
+    if (state !== 'RELEASED')
+      throw new DomainError('AUTOMATIC_RELEASE_INCOMPLETE', 'Automatic release did not complete.');
+
+    return this.transaction(context, async (client) => {
+      const monitor = prepared.monitor;
+      const manifestResult = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM packet_manifests WHERE id=$1',
+        [monitor.manifestId],
+      );
+      const manifestRow = manifestResult.rows[0];
+      if (!manifestRow) throw new Error('PACKET_MANIFEST_NOT_FOUND');
+      const manifest = decryptPayload('packet_manifests', manifestRow, this.fieldEncryptionKey);
+      const itemIds = Array.isArray(manifest.itemIds)
+        ? manifest.itemIds.filter((id): id is string => typeof id === 'string')
+        : [];
+      const sections: string[] = [];
+      for (const table of printablePacketTables) {
+        if (itemIds.length === 0) break;
+        const records = await client.query(
+          `SELECT id, tenant_id, household_id, payload FROM ${table} WHERE id = ANY($1::uuid[])`,
+          [itemIds],
+        );
+        for (const record of records.rows) {
+          const value = decryptPayload(table, record, this.fieldEncryptionKey);
+          const summary = `${table}: ${JSON.stringify(value)}`;
+          assertSafeContent(summary);
+          sections.push(summary.slice(0, 2_000));
+        }
+      }
+      if (sections.length === 0) sections.push('No printable packet items were selected.');
+      const householdResult = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM households WHERE id=$1',
+        [context.householdId],
+      );
+      const household = householdResult.rows[0]
+        ? decryptPayload('households', householdResult.rows[0], this.fieldEncryptionKey)
+        : {};
+      let recipientEmail: string | undefined;
+      if (monitor.recipientProfileId) {
+        const profileResult = await client.query(
+          'SELECT id, tenant_id, household_id, payload FROM recipient_delivery_profiles WHERE id=$1',
+          [monitor.recipientProfileId],
+        );
+        const profile = profileResult.rows[0]
+          ? decryptPayload(
+              'recipient_delivery_profiles',
+              profileResult.rows[0],
+              this.fieldEncryptionKey,
+            )
+          : {};
+        if (profile.status === 'VERIFIED' && typeof profile.email === 'string')
+          recipientEmail = profile.email;
+      }
+      let physicalMail: AutomaticReleaseDelivery['physicalMail'];
+      if (monitor.physicalMail && monitor.postalAddressId) {
+        const addressResult = await client.query(
+          'SELECT id, tenant_id, household_id, payload FROM recipient_postal_addresses WHERE id=$1',
+          [monitor.postalAddressId],
+        );
+        if (addressResult.rows[0]) {
+          const address = decryptPayload(
+            'recipient_postal_addresses',
+            addressResult.rows[0],
+            this.fieldEncryptionKey,
+          ) as VerifiedPostalAddress & { recipientId: string };
+          physicalMail = { address, ...monitor.physicalMail };
+        }
+      }
+      return {
+        monitorId,
+        tenantId: context.tenantId,
+        householdId: context.householdId,
+        accessRequestId: prepared.accessRequestId,
+        ...(recipientEmail ? { recipientEmail } : {}),
+        recipientId: monitor.recipientId,
+        packetId: monitor.packetId,
+        manifestHash: monitor.manifestHash,
+        householdName: typeof household.name === 'string' ? household.name : 'Household',
+        sections,
+        ...(physicalMail ? { physicalMail } : {}),
+      };
+    });
+  }
+
+  async recordReleaseArtifact(
+    context: RequestContext & { householdId: string },
+    input: Readonly<{
+      monitorId: string;
+      accessRequestId: string;
+      objectId: string;
+      checksumSha256: string;
+      manifestHash: string;
+      recipientId: string;
+    }>,
+  ): Promise<Readonly<{ tokenId: string; token: string; expiresAt: string }>> {
+    const artifactId = randomUUID();
+    const tokenId = randomUUID();
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    const tokenHash = this.recoveryHash(context.tenantId, tokenId, token);
+    const result = await this.transaction(context, async (client) => {
+      const existing = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM release_artifacts WHERE payload->>'accessRequestId'=$1 LIMIT 1",
+        [input.accessRequestId],
+      );
+      if (existing.rows[0]) {
+        const prior = decryptPayload(
+          'release_artifacts',
+          existing.rows[0],
+          this.fieldEncryptionKey,
+        );
+        if (
+          typeof prior.tokenId !== 'string' ||
+          typeof prior.deliveryToken !== 'string' ||
+          typeof prior.expiresAt !== 'string' ||
+          prior.checksumSha256 !== input.checksumSha256
+        )
+          throw new DomainError(
+            'RELEASE_ARTIFACT_CONFLICT',
+            'Existing release artifact does not match this delivery.',
+          );
+        return {
+          artifactId: existing.rows[0].id as string,
+          tokenId: prior.tokenId,
+          token: prior.deliveryToken,
+          expiresAt: prior.expiresAt,
+          created: false,
+        } as const;
+      }
+      await client.query(
+        'INSERT INTO release_artifacts (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+        [
+          artifactId,
+          context.tenantId,
+          context.householdId,
+          encryptPayload(
+            'release_artifacts',
+            artifactId,
+            context.tenantId,
+            context.householdId,
+            {
+              ...input,
+              mediaType: 'application/pdf',
+              createdAt: new Date().toISOString(),
+              tokenId,
+              deliveryToken: token,
+              expiresAt,
+            },
+            this.fieldEncryptionKey,
+            { accessRequestId: input.accessRequestId, monitorId: input.monitorId },
+          ),
+        ],
+      );
+      await client.query(
+        'INSERT INTO release_delivery_tokens (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+        [
+          tokenId,
+          context.tenantId,
+          context.householdId,
+          encryptPayload(
+            'release_delivery_tokens',
+            tokenId,
+            context.tenantId,
+            context.householdId,
+            {
+              artifactId,
+              recipientId: input.recipientId,
+              expiresAt,
+              revokedAt: null,
+              accessCount: 0,
+            },
+            this.fieldEncryptionKey,
+            { tokenHash, artifactId, monitorId: input.monitorId },
+          ),
+        ],
+      );
+      return { artifactId, tokenId, token, expiresAt, created: true } as const;
+    });
+    if (result.created)
+      await this.appendAudit(
+        context,
+        'continuity-monitor:release-artifact-created',
+        result.artifactId,
+        input.checksumSha256,
+      );
+    return { tokenId: result.tokenId, token: result.token, expiresAt: result.expiresAt };
+  }
+
+  async redeemReleaseArtifact(input: {
+    tenantId: string;
+    householdId: string;
+    tokenId: string;
+    token: string;
+  }): Promise<Readonly<{ objectId: string; checksumSha256: string; mediaType: string }>> {
+    const context: RequestContext & { householdId: string } = {
+      tenantId: input.tenantId,
+      householdId: input.householdId,
+      actorId: input.tokenId,
+      purpose: 'recipient packet redemption',
+    };
+    const result = await this.transaction(context, async (client) => {
+      const selected = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM release_delivery_tokens WHERE id=$1 FOR UPDATE',
+        [input.tokenId],
+      );
+      const row = selected.rows[0];
+      if (!row)
+        throw new DomainError('RELEASE_TOKEN_INVALID', 'Release link is invalid or expired.');
+      const expectedHash = (row.payload as Record<string, unknown>).tokenHash;
+      const suppliedHash = this.recoveryHash(input.tenantId, input.tokenId, input.token);
+      const tokenPayload = decryptPayload('release_delivery_tokens', row, this.fieldEncryptionKey);
+      if (
+        typeof expectedHash !== 'string' ||
+        expectedHash.length !== suppliedHash.length ||
+        !timingSafeEqual(Buffer.from(expectedHash), Buffer.from(suppliedHash)) ||
+        typeof tokenPayload.expiresAt !== 'string' ||
+        new Date(tokenPayload.expiresAt).getTime() < Date.now() ||
+        tokenPayload.revokedAt !== null
+      )
+        throw new DomainError('RELEASE_TOKEN_INVALID', 'Release link is invalid or expired.');
+      const artifactResult = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM release_artifacts WHERE id=$1',
+        [tokenPayload.artifactId],
+      );
+      const artifactRow = artifactResult.rows[0];
+      if (!artifactRow)
+        throw new DomainError('RELEASE_TOKEN_INVALID', 'Release link is invalid or expired.');
+      const artifact = decryptPayload('release_artifacts', artifactRow, this.fieldEncryptionKey);
+      const updatedToken = encryptPayload(
+        'release_delivery_tokens',
+        input.tokenId,
+        input.tenantId,
+        input.householdId,
+        {
+          ...tokenPayload,
+          accessCount: Number(tokenPayload.accessCount ?? 0) + 1,
+          lastAccessedAt: new Date().toISOString(),
+        },
+        this.fieldEncryptionKey,
+        {
+          tokenHash: expectedHash,
+          artifactId: String(tokenPayload.artifactId),
+          monitorId: String((row.payload as Record<string, unknown>).monitorId),
+        },
+      );
+      await client.query(
+        'UPDATE release_delivery_tokens SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [updatedToken, input.tokenId],
+      );
+      if (
+        typeof artifact.objectId !== 'string' ||
+        typeof artifact.checksumSha256 !== 'string' ||
+        artifact.mediaType !== 'application/pdf'
+      )
+        throw new Error('RELEASE_ARTIFACT_INVALID');
+      return {
+        objectId: artifact.objectId,
+        checksumSha256: artifact.checksumSha256,
+        mediaType: artifact.mediaType,
+      };
+    });
+    await this.appendAudit(
+      context,
+      'continuity-monitor:release-artifact-accessed',
+      input.tokenId,
+      createHash('sha256').update(input.tokenId).digest('hex'),
+    );
+    return result;
+  }
+
+  async reservePhysicalMailOrder(
+    context: RequestContext & { householdId: string },
+    input: Readonly<{
+      monitorId: string;
+      accessRequestId: string;
+      provider: 'lob' | 'postgrid';
+      idempotencyKey: string;
+      contentSha256: string;
+    }>,
+  ): Promise<Readonly<{ reserved: boolean; status: string; providerOrderId?: string }>> {
+    return this.transaction(context, async (client) => {
+      const existing = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM physical_mail_orders WHERE payload->>'idempotencyKey'=$1 FOR UPDATE",
+        [input.idempotencyKey],
+      );
+      if (existing.rows[0]) {
+        const payload = decryptPayload(
+          'physical_mail_orders',
+          existing.rows[0],
+          this.fieldEncryptionKey,
+        );
+        return {
+          reserved: false,
+          status:
+            typeof payload.providerOrderId === 'string'
+              ? 'ACCEPTED'
+              : String(payload.submissionStatus ?? payload.status),
+          ...(typeof payload.providerOrderId === 'string'
+            ? { providerOrderId: payload.providerOrderId }
+            : {}),
+        } as const;
+      }
+      const id = randomUUID();
+      const payload = encryptPayload(
+        'physical_mail_orders',
+        id,
+        context.tenantId,
+        context.householdId,
+        { ...input, status: 'SUBMITTING', reservedAt: new Date().toISOString() },
+        this.fieldEncryptionKey,
+        {
+          idempotencyKey: input.idempotencyKey,
+          provider: input.provider,
+          monitorId: input.monitorId,
+        },
+      );
+      await client.query(
+        'INSERT INTO physical_mail_orders (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4)',
+        [id, context.tenantId, context.householdId, payload],
+      );
+      return { reserved: true, status: 'SUBMITTING' } as const;
+    });
+  }
+
+  async recordPhysicalMailOrder(
+    context: RequestContext & { householdId: string },
+    input: Readonly<{
+      monitorId: string;
+      accessRequestId: string;
+      provider: 'lob' | 'postgrid';
+      providerOrderId: string;
+      status: string;
+      acceptedAt: string;
+      trackingNumber?: string;
+      idempotencyKey: string;
+      contentSha256: string;
+    }>,
+  ): Promise<void> {
+    await this.transaction(context, async (client) => {
+      const selected = await client.query(
+        "SELECT id FROM physical_mail_orders WHERE payload->>'idempotencyKey'=$1 FOR UPDATE",
+        [input.idempotencyKey],
+      );
+      const id = selected.rows[0]?.id as string | undefined;
+      if (!id) throw new Error('PHYSICAL_MAIL_RESERVATION_REQUIRED');
+      await client.query(
+        'UPDATE physical_mail_orders SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [
+          encryptPayload(
+            'physical_mail_orders',
+            id,
+            context.tenantId,
+            context.householdId,
+            { ...input, submissionStatus: 'ACCEPTED' },
+            this.fieldEncryptionKey,
+            {
+              idempotencyKey: input.idempotencyKey,
+              provider: input.provider,
+              providerOrderId: input.providerOrderId,
+              monitorId: input.monitorId,
+            },
+          ),
+          id,
+        ],
+      );
+    });
+    await this.appendAudit(
+      context,
+      'continuity-monitor:physical-mail-accepted',
+      input.providerOrderId,
+      input.contentSha256,
+    );
+  }
+
+  async processPhysicalMailEvent(
+    context: RequestContext & { householdId: string },
+    event: VerifiedPhysicalMailEvent,
+  ): Promise<'processed' | 'duplicate'> {
+    const id = randomUUID();
+    const providerEventKey = `${event.provider}:${event.eventId}`;
+    const result = await this.transaction(context, async (client) => {
+      const order = await client.query(
+        "SELECT id, tenant_id, household_id, payload FROM physical_mail_orders WHERE payload->>'provider'=$1 AND payload->>'providerOrderId'=$2 FOR UPDATE",
+        [event.provider, event.providerOrderId],
+      );
+      const orderRow = order.rows[0];
+      if (!orderRow)
+        throw new DomainError('PHYSICAL_MAIL_ORDER_NOT_FOUND', 'Physical mail order not found.');
+      const accepted = await client.query(
+        'INSERT INTO physical_mail_events (id, tenant_id, household_id, payload) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING id',
+        [
+          id,
+          context.tenantId,
+          context.householdId,
+          encryptPayload(
+            'physical_mail_events',
+            id,
+            context.tenantId,
+            context.householdId,
+            event,
+            this.fieldEncryptionKey,
+            { providerEventKey, providerOrderId: event.providerOrderId },
+          ),
+        ],
+      );
+      if (!accepted.rowCount) return 'duplicate' as const;
+      const orderPayload = decryptPayload(
+        'physical_mail_orders',
+        orderRow,
+        this.fieldEncryptionKey,
+      );
+      const updated = encryptPayload(
+        'physical_mail_orders',
+        orderRow.id,
+        context.tenantId,
+        context.householdId,
+        {
+          ...orderPayload,
+          status: event.status,
+          submissionStatus: 'ACCEPTED',
+          lastEventType: event.type,
+          lastEventAt: event.occurredAt,
+          ...(event.trackingNumber ? { trackingNumber: event.trackingNumber } : {}),
+        },
+        this.fieldEncryptionKey,
+        {
+          idempotencyKey: String((orderRow.payload as Record<string, unknown>).idempotencyKey),
+          provider: event.provider,
+          providerOrderId: event.providerOrderId,
+          monitorId: String((orderRow.payload as Record<string, unknown>).monitorId),
+        },
+      );
+      await client.query(
+        'UPDATE physical_mail_orders SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [updated, orderRow.id],
+      );
+      return 'processed' as const;
+    });
+    if (result === 'processed')
+      await this.appendAudit(
+        context,
+        `continuity-monitor:physical-mail-${event.status}`,
+        event.providerOrderId,
+        createHash('sha256').update(event.eventId).digest('hex'),
+      );
+    return result;
+  }
+
+  async completeAutomaticReleaseDelivery(
+    context: RequestContext & { householdId: string },
+    monitorId: string,
+    delivery: Readonly<{ digitalDelivered: boolean; physicalMailAccepted: boolean }>,
+  ): Promise<void> {
+    await this.transaction(context, async (client) => {
+      const selected = await client.query(
+        'SELECT id, tenant_id, household_id, payload FROM continuity_monitors WHERE id=$1 FOR UPDATE',
+        [monitorId],
+      );
+      const row = selected.rows[0];
+      if (!row)
+        throw new DomainError('CONTINUITY_MONITOR_NOT_FOUND', 'Continuity monitor not found.');
+      const monitor = decryptPayload(
+        'continuity_monitors',
+        row,
+        this.fieldEncryptionKey,
+      ) as StoredContinuityMonitor;
+      const requiredDigital = monitor.policy.digitalDelivery;
+      const requiredPhysical = Boolean(monitor.physicalMail);
+      const success =
+        (!requiredDigital || delivery.digitalDelivered) &&
+        (!requiredPhysical || delivery.physicalMailAccepted);
+      const updated: StoredContinuityMonitor = {
+        ...monitor,
+        state: success ? 'AUTOMATICALLY_RELEASED' : 'DELIVERY_FAILED',
+        nextActionAt: new Date().toISOString(),
+      };
+      await client.query(
+        'UPDATE continuity_monitors SET payload=$1, version=version+1, updated_at=now() WHERE id=$2',
+        [
+          encryptPayload(
+            'continuity_monitors',
+            monitorId,
+            context.tenantId,
+            context.householdId,
+            updated,
+            this.fieldEncryptionKey,
+            monitorMetadata(updated),
+          ),
+          monitorId,
+        ],
+      );
+    });
+    await this.appendAudit(
+      context,
+      delivery.digitalDelivered || delivery.physicalMailAccepted
+        ? 'continuity-monitor:delivery-completed'
+        : 'continuity-monitor:delivery-failed',
+      monitorId,
+      createHash('sha256').update(JSON.stringify(delivery)).digest('hex'),
+    );
   }
 
   private emailLookup(tenantId: string, email: string): string {

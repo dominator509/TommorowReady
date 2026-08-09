@@ -12,6 +12,8 @@ Preflight is the sole interactive bootstrap boundary. Auto-deploy is not authori
 | DeepSeek | Optional AI assistance | Inference only | `DEEPSEEK_API_KEY`; read-only/minimal authorized probe |
 | Transactional email | Verification, alerts, challenge notices | One verified sending domain | `SMTP_URL`; connection/auth probe |
 | SMS | Optional high-risk challenge notices | Restricted messaging service | Optional presence and sandbox probe |
+| Lob | Optional address verification and postal release delivery | Restricted test key and signed-webhook secret | `LOB_API_KEY`, `LOB_WEBHOOK_SECRET`; authenticated contract/live-fire probe |
+| PostGrid | Optional secondary address verification and postal release delivery | Restricted test key, signed-webhook secret, and approved return contact | `POSTGRID_API_KEY`, `POSTGRID_WEBHOOK_SECRET`, `POSTGRID_RETURN_CONTACT_ID`; authenticated contract/live-fire probe |
 | Stripe | Subscription billing | Restricted test key | Account-metadata probe |
 | KMS | Production envelope encryption | Encrypt/decrypt for dedicated key only | Required for production, optional local development |
 | Legal approval | Terms, privacy, child-data, release, consent | Written qualified-counsel approval | Evidence reference only after approval |
@@ -31,6 +33,18 @@ FIELD_ENCRYPTION_KEY|REQUIRED|-
 DEEPSEEK_API_KEY|OPTIONAL|scripts/probes/deepseek_api_key.sh
 SMTP_URL|OPTIONAL|scripts/probes/smtp_url.sh
 SMS_PROVIDER_TOKEN|OPTIONAL|-
+LOB_API_KEY|OPTIONAL|scripts/probes/lob_api_key.sh
+LOB_WEBHOOK_SECRET|OPTIONAL|-
+POSTGRID_API_KEY|OPTIONAL|scripts/probes/postgrid_api_key.sh
+POSTGRID_WEBHOOK_SECRET|OPTIONAL|-
+POSTGRID_RETURN_CONTACT_ID|OPTIONAL|-
+PHYSICAL_MAIL_FROM_NAME|OPTIONAL|-
+PHYSICAL_MAIL_FROM_ADDRESS_LINE1|OPTIONAL|-
+PHYSICAL_MAIL_FROM_ADDRESS_LINE2|OPTIONAL|-
+PHYSICAL_MAIL_FROM_CITY|OPTIONAL|-
+PHYSICAL_MAIL_FROM_STATE|OPTIONAL|-
+PHYSICAL_MAIL_FROM_POSTAL_CODE|OPTIONAL|-
+PHYSICAL_MAIL_FROM_COUNTRY_CODE|OPTIONAL|-
 STRIPE_SECRET_KEY|OPTIONAL|scripts/probes/stripe_secret_key.sh
 STRIPE_WEBHOOK_SECRET|OPTIONAL|-
 KMS_KEY_ID|OPTIONAL|-
@@ -50,6 +64,7 @@ KUBERNETES_CONTEXT|OPTIONAL|-
 PRODUCTION_NAMESPACE|OPTIONAL|-
 ROLLBACK_AUTHORIZED|OPTIONAL|-
 AUTO_DEPLOY_AUTHORIZED|REQUIRED|-
+CONTINUITY_AUTOMATION_ENABLED|REQUIRED|-
 PREFLIGHT-TABLE-END
 
 ## Fail-closed rules

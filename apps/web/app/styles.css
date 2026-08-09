@@ -260,12 +260,37 @@ footer {
   font-weight: 500;
 }
 .actions,
-.page-links {
+.page-links,
+.button-row,
+.checkbox-row {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 0.75rem;
+}
+.nested-panel {
+  background: #f8faf8;
+  border: 1px solid #cbd5cf;
+  border-radius: 0.75rem;
+  margin: 1rem 0;
+  padding: 1rem;
+}
+.nested-panel legend {
+  font-weight: 800;
+  padding: 0 0.4rem;
+}
+.checkbox-row {
+  justify-content: flex-start;
+}
+.checkbox-row input {
+  inline-size: auto;
+  margin: 0;
+}
+.button.danger {
+  background: #8c261f;
+  border-color: #8c261f;
+  color: #fff;
 }
 .page-links a {
   min-height: 44px;

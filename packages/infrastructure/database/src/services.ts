@@ -119,12 +119,63 @@ export class RedisPasskeyChallengeStore {
   }
 }
 
+export class RedisPhysicalMailRouter {
+  private readonly client: Redis;
+  constructor(
+    url: string,
+    private readonly routingSecret: string,
+  ) {
+    if (Buffer.byteLength(routingSecret, 'utf8') < 32)
+      throw new Error('PHYSICAL_MAIL_ROUTING_SECRET_INVALID');
+    this.client = redisClient(url, 1_000);
+  }
+  private key(provider: string, providerOrderId: string): string {
+    return `tomorrowready:physical-mail-route:${createHash('sha256')
+      .update(this.routingSecret)
+      .update(':')
+      .update(provider)
+      .update(':')
+      .update(providerOrderId)
+      .digest('hex')}`;
+  }
+  async ready(): Promise<void> {
+    await this.client.ping();
+  }
+  async put(
+    provider: 'lob' | 'postgrid',
+    providerOrderId: string,
+    route: Readonly<{ tenantId: string; householdId: string }>,
+  ): Promise<void> {
+    await this.client.set(
+      this.key(provider, providerOrderId),
+      JSON.stringify(route),
+      'EX',
+      366 * 86_400,
+    );
+  }
+  async get(
+    provider: 'lob' | 'postgrid',
+    providerOrderId: string,
+  ): Promise<Readonly<{ tenantId: string; householdId: string }> | null> {
+    const value = await this.client.get(this.key(provider, providerOrderId));
+    if (!value) return null;
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (typeof parsed.tenantId !== 'string' || typeof parsed.householdId !== 'string')
+      throw new Error('PHYSICAL_MAIL_ROUTE_INVALID');
+    return { tenantId: parsed.tenantId, householdId: parsed.householdId };
+  }
+  async close(): Promise<void> {
+    await this.client.quit();
+  }
+}
+
 export type DurableJob = Readonly<{
   id: string;
   tenantId: string;
   householdId: string;
-  type: 'packet' | 'notification' | 'retention' | 'export' | 'purge';
+  type: 'packet' | 'notification' | 'retention' | 'export' | 'purge' | 'continuity-monitor';
   idempotencyKey: string;
+  resourceId?: string;
 }>;
 
 export type ClaimedDurableJob = Readonly<{
@@ -135,7 +186,14 @@ export type ClaimedDurableJob = Readonly<{
 
 function assertDurableJob(value: unknown): asserts value is DurableJob {
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const types = new Set(['packet', 'notification', 'retention', 'export', 'purge']);
+  const types = new Set([
+    'packet',
+    'notification',
+    'retention',
+    'export',
+    'purge',
+    'continuity-monitor',
+  ]);
   if (
     !value ||
     typeof value !== 'object' ||
@@ -154,7 +212,14 @@ function assertDurableJob(value: unknown): asserts value is DurableJob {
     !('idempotencyKey' in value) ||
     typeof value.idempotencyKey !== 'string' ||
     value.idempotencyKey.length < 1 ||
-    value.idempotencyKey.length > 200
+    value.idempotencyKey.length > 200 ||
+    (value.type === 'continuity-monitor' &&
+      (!('resourceId' in value) ||
+        typeof value.resourceId !== 'string' ||
+        !uuid.test(value.resourceId))) ||
+    ('resourceId' in value &&
+      value.resourceId !== undefined &&
+      (typeof value.resourceId !== 'string' || !uuid.test(value.resourceId)))
   )
     throw new Error('QUEUE_JOB_INVALID');
 }
@@ -165,6 +230,8 @@ export class RealJobQueue {
   private readonly group = 'tomorrowready-workers-v1';
   private readonly attempts = 'tomorrowready:job-attempts:v1';
   private readonly deadLetters = 'tomorrowready:jobs-dead-letter:v1';
+  private readonly scheduled = 'tomorrowready:jobs-scheduled:v1';
+  private readonly scheduledPayloads = 'tomorrowready:jobs-scheduled-payloads:v1';
 
   constructor(url: string) {
     this.client = redisClient(url, 2_000);
@@ -200,6 +267,47 @@ export class RealJobQueue {
       '604800',
     )) as [number, string];
     return { enqueued: result[0] === 1, streamId: result[1] };
+  }
+
+  async schedule(job: DurableJob, dueAt: Date): Promise<void> {
+    assertDurableJob(job);
+    if (!Number.isFinite(dueAt.getTime())) throw new Error('QUEUE_DUE_AT_INVALID');
+    const member = createHash('sha256')
+      .update(`${job.tenantId}:${job.type}:${job.resourceId ?? job.idempotencyKey}`)
+      .digest('hex');
+    await this.client
+      .multi()
+      .hset(this.scheduledPayloads, member, JSON.stringify(job))
+      .zadd(this.scheduled, dueAt.getTime(), member)
+      .exec();
+  }
+
+  async promoteDue(now = new Date()): Promise<boolean> {
+    if (!Number.isFinite(now.getTime())) throw new Error('QUEUE_DUE_AT_INVALID');
+    await this.ready();
+    const script = `
+      local values = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, 1)
+      if #values == 0 then return 0 end
+      if redis.call('ZREM', KEYS[1], values[1]) ~= 1 then return 0 end
+      local payload = redis.call('HGET', KEYS[3], values[1])
+      if not payload and string.sub(values[1], 1, 1) == '{' then payload = values[1] end
+      if not payload then return redis.error_reply('QUEUE_SCHEDULE_PAYLOAD_MISSING') end
+      redis.call('HDEL', KEYS[3], values[1])
+      redis.call('XADD', KEYS[2], '*', 'job', payload)
+      return 1
+    `;
+    return (
+      Number(
+        await this.client.eval(
+          script,
+          3,
+          this.scheduled,
+          this.stream,
+          this.scheduledPayloads,
+          now.getTime(),
+        ),
+      ) === 1
+    );
   }
 
   async claim(consumer: string, blockMilliseconds = 100): Promise<ClaimedDurableJob | null> {
@@ -355,8 +463,16 @@ export class RealObjectStorage {
         typeof error === 'object' &&
         '$metadata' in error &&
         (error.$metadata as { httpStatusCode?: number }).httpStatusCode === 412
-      )
-        throw new Error('IMMUTABLE_OBJECT_ALREADY_EXISTS');
+      ) {
+        const existing = await this.getPrivate({
+          tenantId: input.tenantId,
+          householdId: input.householdId,
+          objectId: input.objectId,
+        });
+        if (createHash('sha256').update(existing).digest('hex') === checksumSha256)
+          return { key, checksumSha256 };
+        throw new Error('IMMUTABLE_OBJECT_ALREADY_EXISTS_WITH_DIFFERENT_CONTENT');
+      }
       throw error;
     }
     return { key, checksumSha256 };
