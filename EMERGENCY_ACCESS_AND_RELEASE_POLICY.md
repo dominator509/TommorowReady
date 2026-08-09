@@ -8,7 +8,7 @@ Define the only permitted mechanism for releasing TomorrowReady packets when an 
 - The owner configures recipients, packet scopes, challenge periods, and verification requirements in advance.
 - The platform does not determine legal death, incapacity, guardianship, or inheritance.
 - AI never approves, denies, or scores an emergency request.
-- Ambiguity becomes manual review or denial, never automatic release.
+- Ambiguity becomes a security lock, manual review, or denial, never automatic success.
 
 ## Policy components
 Each armed policy records owner, household, packet manifest selector, recipient, purpose, challenge duration, required verification methods, secondary verifiers, notification channels, expiry, revocation state, jurisdictional disclosures, and version.
@@ -25,8 +25,21 @@ Each armed policy records owner, household, packet manifest selector, recipient,
 9. Approved packet is encrypted and released through an expiring, recipient-bound channel.
 10. Every view and download is audited; access expires and can be revoked where possible.
 
+## Owner-controlled continuity monitor
+An owner may opt in to a separate missed-check-in workflow and may disable, check in, snooze, cancel,
+or deny it at any time before release. The owner chooses the cadence, reminders, grace period, exact
+recipient-specific manifest, and digital or physical channels. Arming requires step-up authentication,
+a recent successful test, verified recipient contact, and for postal delivery a provider-verified
+address. The system sends repeated notices and reevaluates all predicates at the release point.
+Routine safe releases require no TomorrowReady employee approval. Conflict, takeover signals,
+notification failure, stale verification, provider ambiguity, or manifest drift locks the workflow
+instead of releasing.
+
 ## Prohibited release grounds
-A single death certificate upload; an obituary; social-media content; an AI inference; inactivity alone; missed check-ins alone; a family relationship alone; possession of the owner's device; an unverified email request; or a support employee's discretion.
+A single death certificate upload; an obituary; social-media content; an AI inference; a family
+relationship alone; possession of the owner's device; an unverified email request; or a support
+employee's discretion. Inactivity or missed check-ins may trigger release only under an explicitly
+armed continuity monitor satisfying every control in the preceding section.
 
 ## Denial and appeal
 Denial does not expose household content. Repeated requests are rate-limited. A documented manual review may resolve identity or provider ambiguity but cannot override an absent owner-configured policy without separately approved legal process.

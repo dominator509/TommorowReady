@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import {
+  advanceContinuityMonitor,
   authorizeHelper,
   buildPacketManifest,
   calculateReadiness,
   canAccessPacket,
   containsProhibitedSecret,
+  ownerContinuityMonitorAction,
   transitionRelease,
 } from '../../packages/domain/src/index.js';
 
@@ -128,5 +130,94 @@ describe('domain invariants', () => {
       'MANUAL_REVIEW_REQUIRED',
     );
     expect(() => transitionRelease('CHALLENGE_ACTIVE', 'APPROVED_FOR_RELEASE', context)).toThrow();
+  });
+  it('requires an explicit recent test before arming a continuity monitor', () => {
+    const now = new Date('2026-08-08T12:00:00Z');
+    const snapshot = {
+      state: 'DISABLED' as const,
+      policy: {
+        checkInIntervalDays: 30,
+        reminderOffsetsHours: [0, 24, 72],
+        gracePeriodHours: 168,
+        releaseDelayHours: 24,
+        digitalDelivery: true,
+      },
+      nextActionAt: now,
+      cycleDueAt: now,
+      reminderIndex: 0,
+    };
+    expect(() => ownerContinuityMonitorAction(snapshot, 'ARM', now)).toThrow(
+      'A recent successful monitor test is required.',
+    );
+    const armed = ownerContinuityMonitorAction(snapshot, 'ARM', now, {
+      recentSuccessfulTest: true,
+    });
+    expect(armed.state).toBe('ARMED');
+    expect(armed.nextActionAt.toISOString()).toBe('2026-09-07T12:00:00.000Z');
+  });
+  it('moves missed check-ins through reminders and grace but locks on any unsafe predicate', () => {
+    const due = new Date('2026-08-08T12:00:00Z');
+    const policy = {
+      checkInIntervalDays: 30,
+      reminderOffsetsHours: [0],
+      gracePeriodHours: 24,
+      releaseDelayHours: 0,
+      digitalDelivery: true,
+    };
+    const safety = {
+      recipientVerified: true,
+      manifestCurrent: true,
+      recentSuccessfulTest: true,
+      notificationsHealthy: true,
+      ownerDenied: false,
+      takeoverSignal: false,
+      addressVerified: true,
+    };
+    const checkInDue = advanceContinuityMonitor(
+      { state: 'ARMED', policy, nextActionAt: due, cycleDueAt: due, reminderIndex: 0 },
+      safety,
+      due,
+    );
+    expect(checkInDue).toMatchObject({ state: 'CHECK_IN_DUE', effect: 'OWNER_CHECK_IN_DUE' });
+    const reminder = advanceContinuityMonitor(checkInDue, safety, due);
+    expect(reminder).toMatchObject({ state: 'REMINDERS_ACTIVE', effect: 'OWNER_REMINDER' });
+    const grace = advanceContinuityMonitor(reminder, safety, new Date('2026-08-09T12:00:00Z'));
+    expect(grace).toMatchObject({ state: 'GRACE_PERIOD', effect: 'OWNER_GRACE_NOTICE' });
+    const locked = advanceContinuityMonitor(
+      grace,
+      { ...safety, notificationsHealthy: false },
+      new Date('2026-08-09T12:00:01Z'),
+    );
+    expect(locked).toMatchObject({ state: 'SECURITY_LOCKED', effect: 'SECURITY_LOCK' });
+  });
+  it('releases only the selected monitor after every deterministic safety predicate passes', () => {
+    const now = new Date('2026-08-10T12:00:00Z');
+    const result = advanceContinuityMonitor(
+      {
+        state: 'GRACE_PERIOD',
+        policy: {
+          checkInIntervalDays: 30,
+          reminderOffsetsHours: [0, 24],
+          gracePeriodHours: 48,
+          releaseDelayHours: 24,
+          digitalDelivery: true,
+          physicalMailMode: 'SECURE_ACCESS_LETTER',
+        },
+        nextActionAt: now,
+        cycleDueAt: new Date('2026-08-07T12:00:00Z'),
+        reminderIndex: 2,
+      },
+      {
+        recipientVerified: true,
+        manifestCurrent: true,
+        recentSuccessfulTest: true,
+        notificationsHealthy: true,
+        ownerDenied: false,
+        takeoverSignal: false,
+        addressVerified: true,
+      },
+      now,
+    );
+    expect(result).toMatchObject({ state: 'RELEASE_PENDING', effect: 'RELEASE_PACKET' });
   });
 });

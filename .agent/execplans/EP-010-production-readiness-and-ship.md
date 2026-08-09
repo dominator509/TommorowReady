@@ -11,7 +11,10 @@ NODE-META-END
 Run every gate from scratch, prove packet isolation and emergency release, complete legal and privacy reviews, perform backup and rollback drills, tag the release, and stop before manual production deployment.
 
 # 2. Scope
-Only the capabilities and paths declared by this node and its linked specifications.
+Only the capabilities and paths declared by this node and its linked specifications. The operator's
+2026-08-08 product-authority override adds an optional, owner-controlled continuity monitor,
+automated deterministic packet release, recipient delivery, and print-mail fulfillment before the
+ship gate is rerun.
 
 # 3. Non-goals
 No unrelated refactors, speculative integrations, production deployment, fabricated effects, or weakening of gates.
@@ -23,6 +26,10 @@ Read PROJECT_BRIEF.md, ARCHITECTURE.md, SECURITY.md, TESTING.md, and the relevan
 AGENTS.md; COMMANDS.md; .agent/GRAPH.md; .agent/LOOPS.md; PROJECT_BRIEF.md; ARCHITECTURE.md; SECURITY.md; TESTING.md.
 
 # 6. Expected Changed Files
+- Product, architecture, security, privacy, operations, environment, decision, assumption, command,
+  and handoff documents governing automated release and physical mail
+- Domain, application, contract, database, provider, API, worker, renderer, web, migration, and test
+  files required by the operator-authorized capability
 - PRODUCTION_READINESS.md
 - RELEASE.md
 - REMOTE_SESSION_HANDOFF.md
@@ -64,6 +71,39 @@ EVIDENCE: sh scripts/ledger.sh append <AGENT_ID> EP-010 MILESTONE_PASS "M3 verif
 FALLBACK: Use the smallest real local-service implementation or narrower provider adapter that preserves every safety invariant; never use a mock production path.
 COMMIT: git add -A && git commit -m "[EP-010][M3] harden and document"
 
+### M4: Specify owner-controlled automation
+GOAL: Record the explicit product-authority override and lock the deterministic monitor, delivery,
+provider, privacy, authorization, and failure contracts.
+READ: AGENTS.md .agent/LOOPS.md SECURITY.md ARCHITECTURE.md EMERGENCY_ACCESS_AND_RELEASE_POLICY.md
+CHANGE: Control/specification documents, contracts, domain, migration, and preflight probe only.
+RUN: sh scripts/typecheck.sh && sh scripts/test-unit.sh
+EXPECT: typecheck: ok and unit tests: ok
+EVIDENCE: sh scripts/ledger.sh append codex EP-010 MILESTONE_PASS "M4 automated release contracts pass"
+FALLBACK: Preserve the existing manual request flow and isolate the new opt-in monitor.
+COMMIT: git add -A && git commit -m "[EP-010][M4] specify automated continuity release"
+
+### M5: Wire automation and delivery
+GOAL: Implement persistence, scheduler, digital delivery, physical-mail adapters, signed webhooks,
+owner controls, recipient redemption, and explicit health/failure states.
+READ: M4 contracts and all changed runtime seams.
+CHANGE: Application, infrastructure, API, worker, renderer, web, environment, and integration tests.
+RUN: sh scripts/typecheck.sh && sh scripts/test-integration.sh && pnpm test:browser
+EXPECT: typecheck: ok, integration tests: ok, and browser tests pass.
+EVIDENCE: sh scripts/ledger.sh append codex EP-010 MILESTONE_PASS "M5 automated release runtime pass"
+FALLBACK: Disable only the unavailable provider and preserve digital and owner check-in workflows.
+COMMIT: git add -A && git commit -m "[EP-010][M5] wire automated continuity delivery"
+
+### M6: Harden, verify, and hand off
+GOAL: Prove safety properties, idempotency, ambiguity handling, accessibility, secret hygiene, and
+all locally possible release gates; update the production handoff honestly.
+READ: AGENTS.md TESTING.md PRODUCTION_READINESS.md .agent/state/DEFERRED_EXTERNALS.md
+CHANGE: Tests, runbooks, observability, production readiness, release, and handoff evidence.
+RUN: sh scripts/verify.sh
+EXPECT: verify: ok
+EVIDENCE: sh scripts/ledger.sh append codex EP-010 MILESTONE_PASS "M6 verify: ok"
+FALLBACK: Block only the externally authenticated print-mail proof; never fabricate postal delivery.
+COMMIT: git add -A && git commit -m "[EP-010][M6] verify automated continuity release"
+
 # 9. Validation and Acceptance
 Run node verification, expected-files audit, scope diff, and relevant live-fire proofs. Observe the sentinel in the current session.
 
@@ -74,6 +114,9 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 - [x] M1 complete with evidence and commit.
 - [x] M2 complete with evidence and commit.
 - [x] M3 complete with evidence and commit.
+- [x] M4 complete with evidence and commit.
+- [ ] M5 pending.
+- [ ] M6 pending.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
@@ -82,6 +125,10 @@ Append dated evidence only.
 - 2026-08-07: All local EP-010 milestones can be committed, but the graph must remain `RESUME EP-010`; external evidence is not a valid `NODE_DONE` substitute.
 - 2026-08-07: Loading the ignored local environment exposed a reproducibility defect: `NODE_ENV=test` reached the Next.js production build and caused `_global-error` prerender failure. Scoping `NODE_ENV=production` to `scripts/build.sh` inside the verifier fixed the build without disabling the deliberately non-production local backup drill.
 - 2026-08-07: The operator attested that counsel/policy review, vendor reviews/DPAs, insurance, and an issue-free independent penetration test are complete. No immutable evidence references were present, so EXT-010 through EXT-013 remain externally unverified.
+- 2026-08-08: The operator explicitly overrode the prior prohibition on inactivity-triggered
+  release and approved an optional dead-man switch plus automatic digital and physical-mail
+  delivery. The override does not authorize AI release decisions, whole-household disclosure by
+  default, secret storage, unverified recipients, ambiguous provider success, or production deploy.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.

@@ -22,7 +22,15 @@ Deny by default. Every request carries user, tenant, household, role, category g
 - Immutable packet manifest locked before approval.
 - One-time or expiring encrypted links; reauthentication before download.
 - Immediate revocation where legally and technically possible.
-- No automatic release of the entire household.
+- Automatic release is optional and limited to exact owner-selected, immutable, recipient-scoped
+  packet manifests; whole-household release is never the default.
+- Continuity-monitor arming requires owner step-up authentication, a recent successful test,
+  preverified recipient channels, healthy notifications, and an explicit grace period.
+- Missed check-ins alone start reminders and grace. Release still requires the armed policy's full
+  deterministic predicates and no denial, takeover signal, stale verification, or security lock.
+- Physical mail requires a provider-verified address, immutable content hash, idempotent submission,
+  authenticated webhook reconciliation, and explicit user disclosure that postal mail cannot always
+  be recalled after provider acceptance.
 - Rate limits and cool-down after denied or failed requests.
 
 ## Secret handling

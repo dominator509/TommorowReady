@@ -8,4 +8,9 @@ Home displays Family Readiness Score, unresolved Family IQ questions, stale reco
 
 Every packet screen shows recipient, purpose, included categories, excluded categories, release method, last test, and review date. Emergency policy screens explain challenge, verification, denial, expiry, and the fact that TomorrowReady does not determine legal death or incapacity.
 
+Continuity-monitor screens additionally explain that the feature is optional, list the exact packet
+and recipient, show the next check-in and grace deadline, expose check-in/snooze/cancel/deny controls,
+show digital and postal delivery health separately, and disclose that accepted physical mail may be
+impossible to recall.
+
 All loading, empty, offline, failure, permission-denied, stale-data, ambiguous-provider, and manual-review states are explicit. WCAG 2.2 AA, keyboard operation, 200 percent zoom, screen-reader labels, non-color status, reduced motion, and printable workflows are required.

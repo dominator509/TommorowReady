@@ -94,6 +94,64 @@ export const releaseTransitionInput = z
     ]),
   })
   .strict();
+export const postalAddressInput = z
+  .object({
+    recipientId: z.string().uuid(),
+    name: z.string().trim().min(1).max(80),
+    addressLine1: z.string().trim().min(1).max(100),
+    addressLine2: z.string().trim().max(100).optional(),
+    city: z.string().trim().min(1).max(100),
+    state: z.string().trim().min(1).max(100),
+    postalCode: z.string().trim().min(2).max(20),
+    countryCode: z.string().regex(/^[A-Z]{2}$/),
+    provider: z.enum(['lob', 'postgrid']),
+  })
+  .strict();
+export const recipientVerificationRequestInput = z
+  .object({ recipientId: z.string().uuid(), email: z.email().max(320) })
+  .strict();
+export const recipientVerificationCompleteInput = z
+  .object({
+    tenantId: z.string().uuid(),
+    householdId: z.string().uuid(),
+    profileId: z.string().uuid(),
+    token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  })
+  .strict();
+export const continuityMonitorInput = z
+  .object({
+    packetId: z.string().uuid(),
+    recipientId: z.string().uuid(),
+    checkInIntervalDays: z.number().int().min(1).max(365),
+    reminderOffsetsHours: z.array(z.number().int().min(0).max(719)).min(1).max(12),
+    gracePeriodHours: z.number().int().min(24).max(720),
+    releaseDelayHours: z.number().int().min(0).max(168).default(24),
+    digitalDelivery: z.boolean(),
+    physicalMail: z
+      .object({
+        addressId: z.string().uuid(),
+        provider: z.enum(['lob', 'postgrid']),
+        mode: z.enum(['SECURE_ACCESS_LETTER', 'SELECTED_INSTRUCTIONS', 'FULL_ELIGIBLE_PACKET']),
+        service: z.enum(['FIRST_CLASS', 'CERTIFIED', 'CERTIFIED_RETURN_RECEIPT', 'REGISTERED']),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export const continuityMonitorActionInput = z
+  .object({
+    action: z.enum(['TEST', 'ARM', 'CHECK_IN', 'SNOOZE', 'CANCEL', 'DENY']),
+    snoozeHours: z.number().int().min(1).max(168).optional(),
+  })
+  .strict();
+export const releaseRedemptionInput = z
+  .object({
+    tenantId: z.string().uuid(),
+    householdId: z.string().uuid(),
+    tokenId: z.string().uuid(),
+    token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  })
+  .strict();
 export type ErrorEnvelope = Readonly<{
   code: string;
   message: string;

@@ -37,6 +37,23 @@ PostgreSQL stores confirmed facts, statuses, recipient scopes, policy versions, 
 
 Transitions require explicit policy predicates. `APPROVED_FOR_RELEASE` requires the configured verification threshold, an unexpired challenge period, no owner denial, no unresolved takeover signal, recipient identity verification, and packet-scope match. A provider timeout or conflicting evidence becomes `MANUAL_REVIEW_REQUIRED`, never success.
 
+## Optional continuity monitor
+The owner may separately opt into a deterministic continuity monitor. Its states are `DISABLED`,
+`ARMED`, `CHECK_IN_DUE`, `REMINDERS_ACTIVE`, `GRACE_PERIOD`, `RELEASE_PENDING`,
+`AUTOMATICALLY_RELEASED`, `SNOOZED`, `CANCELLED`, `OWNER_DENIED`, `SECURITY_LOCKED`, and
+`DELIVERY_FAILED`. It stores an exact packet-manifest hash and preverified recipient profile before
+arming. Missed check-ins cause repeated owner notices and a configurable grace period; they do not
+bypass recipient verification, packet scope, takeover/denial checks, current annual testing,
+notification health, or the existing release-authorization evidence chain. AI and support staff have
+no transition authority.
+
+The worker claims due monitors with database locks, evaluates one deterministic transition, and
+records an outbox/idempotency effect before delivery. Digital delivery uses an expiring recipient
+token and immutable packet artifact. Optional physical delivery uses a provider port, verified postal
+address, immutable content hash, exact idempotency key, signed webhook reconciliation, and a
+fail-closed unknown-outcome state. A second print provider is used only after a definite non-acceptance,
+never after a timeout or ambiguous response.
+
 ## Packet compartmentalization
 Each packet has one purpose, explicit content selectors, one or more recipients, visibility rules, release policy, review date, and immutable manifest version. The default packet contains no raw passwords or authentication secrets. A childcare recipient cannot infer or enumerate financial or executor packets. Object paths, database queries, cache keys, notifications, exports, and audit views enforce packet and tenant boundaries.
 
@@ -55,7 +72,11 @@ Original uploads are immutable. Derivatives retain source hashes. Letters, video
 ## Runtime flow
 Request -> authentication -> tenant and household context -> authorization -> schema validation -> use case -> transaction -> outbox -> worker/provider -> evidence -> user-visible status.
 
-Emergency flow: recipient request -> identity verification -> deterministic policy evaluation -> owner and verifier notifications -> challenge timer -> denial and takeover monitoring -> final policy evaluation -> packet manifest lock -> one-time encrypted release -> access audit -> expiry and revocation.
+Emergency flow: recipient request or an armed monitor reaching its release point -> identity
+verification -> deterministic policy evaluation -> owner and verifier notifications -> challenge or
+monitor grace timer -> denial and takeover monitoring -> final policy evaluation -> packet manifest
+lock -> one-time encrypted release -> optional print-mail order -> access and delivery audit -> expiry
+and revocation.
 
 ## Persistence and concurrency
 Every tenant-owned mutable record has optimistic concurrency. Outbox and inbox tables provide exactly-once business effects over at-least-once delivery. Release uses transaction-scoped advisory locks plus idempotency keys. Packet manifests are content-addressed and immutable after release approval.

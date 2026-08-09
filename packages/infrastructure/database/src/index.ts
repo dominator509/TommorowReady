@@ -81,6 +81,13 @@ const canonicalPayloadTables = [
   'jobs',
   'subscriptions',
   'ai_usage',
+  'continuity_monitors',
+  'recipient_delivery_profiles',
+  'recipient_postal_addresses',
+  'release_delivery_tokens',
+  'release_artifacts',
+  'physical_mail_orders',
+  'physical_mail_events',
 ] as const;
 const appendOnlyTables = [
   'audit_events',
@@ -91,6 +98,8 @@ const appendOnlyTables = [
   'packet_manifests',
   'document_versions',
   'evidence_references',
+  'release_artifacts',
+  'physical_mail_events',
 ] as const;
 
 type EncryptedPayload = Readonly<{ _tr_encrypted_v1: EncryptedEnvelope } & Record<string, unknown>>;
@@ -1136,6 +1145,7 @@ export async function migrateDatabase(
             'migrations/004_billing_idempotency.sql',
             'migrations/005_release_idempotency.sql',
             'migrations/006_passkey_lookup.sql',
+            'migrations/007_automated_release.sql',
           ]
         : [path];
     await pool.query('CREATE SCHEMA IF NOT EXISTS app');

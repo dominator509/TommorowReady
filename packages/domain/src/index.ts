@@ -13,6 +13,55 @@ export type ReleaseState =
   | 'EXPIRED'
   | 'CANCELLED'
   | 'MANUAL_REVIEW_REQUIRED';
+export type ContinuityMonitorState =
+  | 'DISABLED'
+  | 'ARMED'
+  | 'CHECK_IN_DUE'
+  | 'REMINDERS_ACTIVE'
+  | 'GRACE_PERIOD'
+  | 'RELEASE_PENDING'
+  | 'AUTOMATICALLY_RELEASED'
+  | 'SNOOZED'
+  | 'CANCELLED'
+  | 'OWNER_DENIED'
+  | 'SECURITY_LOCKED'
+  | 'DELIVERY_FAILED';
+export type PhysicalMailMode =
+  'SECURE_ACCESS_LETTER' | 'SELECTED_INSTRUCTIONS' | 'FULL_ELIGIBLE_PACKET';
+export type ContinuityMonitorPolicy = Readonly<{
+  checkInIntervalDays: number;
+  reminderOffsetsHours: readonly number[];
+  gracePeriodHours: number;
+  releaseDelayHours: number;
+  digitalDelivery: boolean;
+  physicalMailMode?: PhysicalMailMode;
+}>;
+export type ContinuityMonitorSnapshot = Readonly<{
+  state: ContinuityMonitorState;
+  policy: ContinuityMonitorPolicy;
+  nextActionAt: Date;
+  cycleDueAt: Date;
+  reminderIndex: number;
+}>;
+export type ContinuityMonitorSafety = Readonly<{
+  recipientVerified: boolean;
+  manifestCurrent: boolean;
+  recentSuccessfulTest: boolean;
+  notificationsHealthy: boolean;
+  ownerDenied: boolean;
+  takeoverSignal: boolean;
+  addressVerified: boolean;
+}>;
+export type ContinuityMonitorEffect =
+  | 'NONE'
+  | 'OWNER_CHECK_IN_DUE'
+  | 'OWNER_REMINDER'
+  | 'OWNER_GRACE_NOTICE'
+  | 'RELEASE_PACKET'
+  | 'SECURITY_LOCK';
+export type ContinuityMonitorDecision = Readonly<
+  ContinuityMonitorSnapshot & { effect: ContinuityMonitorEffect }
+>;
 export type ConfirmedFact = Readonly<{
   id: OpaqueId;
   tenantId: OpaqueId;
@@ -97,6 +146,187 @@ export class DomainError extends Error {
   ) {
     super(message);
   }
+}
+
+const hours = (value: number): number => value * 3_600_000;
+const days = (value: number): number => value * 86_400_000;
+
+export function validateContinuityMonitorPolicy(policy: ContinuityMonitorPolicy): void {
+  if (
+    !Number.isInteger(policy.checkInIntervalDays) ||
+    policy.checkInIntervalDays < 1 ||
+    policy.checkInIntervalDays > 365
+  )
+    throw new DomainError('CHECK_IN_INTERVAL_INVALID', 'Check-in interval must be 1 to 365 days.');
+  if (
+    !Number.isInteger(policy.gracePeriodHours) ||
+    policy.gracePeriodHours < 24 ||
+    policy.gracePeriodHours > 720
+  )
+    throw new DomainError('GRACE_PERIOD_INVALID', 'Grace period must be 24 to 720 hours.');
+  if (
+    !Number.isInteger(policy.releaseDelayHours) ||
+    policy.releaseDelayHours < 0 ||
+    policy.releaseDelayHours > 168
+  )
+    throw new DomainError('RELEASE_DELAY_INVALID', 'Release delay must be 0 to 168 hours.');
+  if (policy.reminderOffsetsHours.length < 1 || policy.reminderOffsetsHours.length > 12)
+    throw new DomainError(
+      'REMINDER_SCHEDULE_INVALID',
+      'One to twelve reminder offsets are required.',
+    );
+  let previous = -1;
+  for (const offset of policy.reminderOffsetsHours) {
+    if (
+      !Number.isInteger(offset) ||
+      offset < 0 ||
+      offset >= policy.gracePeriodHours ||
+      offset <= previous
+    )
+      throw new DomainError(
+        'REMINDER_SCHEDULE_INVALID',
+        'Reminder offsets must be unique, increasing, and inside the grace period.',
+      );
+    previous = offset;
+  }
+  if (!policy.digitalDelivery && !policy.physicalMailMode)
+    throw new DomainError(
+      'DELIVERY_CHANNEL_REQUIRED',
+      'At least one delivery channel is required.',
+    );
+}
+
+export function advanceContinuityMonitor(
+  snapshot: ContinuityMonitorSnapshot,
+  safety: ContinuityMonitorSafety,
+  now: Date,
+): ContinuityMonitorDecision {
+  validateContinuityMonitorPolicy(snapshot.policy);
+  if (!Number.isFinite(now.getTime()) || !Number.isFinite(snapshot.nextActionAt.getTime()))
+    throw new DomainError('MONITOR_TIME_INVALID', 'Continuity monitor time is invalid.');
+  if (now < snapshot.nextActionAt) return Object.freeze({ ...snapshot, effect: 'NONE' });
+  if (snapshot.state === 'ARMED' || snapshot.state === 'SNOOZED')
+    return Object.freeze({
+      ...snapshot,
+      state: 'CHECK_IN_DUE',
+      nextActionAt: now,
+      cycleDueAt: snapshot.nextActionAt,
+      reminderIndex: 0,
+      effect: 'OWNER_CHECK_IN_DUE',
+    });
+  if (snapshot.state === 'CHECK_IN_DUE' || snapshot.state === 'REMINDERS_ACTIVE') {
+    const index = snapshot.reminderIndex;
+    const offsets = snapshot.policy.reminderOffsetsHours;
+    if (index < offsets.length) {
+      const nextIndex = index + 1;
+      const nextActionAt =
+        nextIndex < offsets.length
+          ? new Date(snapshot.cycleDueAt.getTime() + hours(offsets[nextIndex]!))
+          : new Date(snapshot.cycleDueAt.getTime() + hours(snapshot.policy.gracePeriodHours));
+      return Object.freeze({
+        ...snapshot,
+        state: 'REMINDERS_ACTIVE',
+        nextActionAt,
+        reminderIndex: nextIndex,
+        effect: 'OWNER_REMINDER',
+      });
+    }
+    return Object.freeze({
+      ...snapshot,
+      state: 'GRACE_PERIOD',
+      nextActionAt: new Date(
+        snapshot.cycleDueAt.getTime() +
+          hours(snapshot.policy.gracePeriodHours + snapshot.policy.releaseDelayHours),
+      ),
+      effect: 'OWNER_GRACE_NOTICE',
+    });
+  }
+  if (snapshot.state === 'GRACE_PERIOD') {
+    const safe =
+      safety.recipientVerified &&
+      safety.manifestCurrent &&
+      safety.recentSuccessfulTest &&
+      safety.notificationsHealthy &&
+      !safety.ownerDenied &&
+      !safety.takeoverSignal &&
+      (!snapshot.policy.physicalMailMode || safety.addressVerified);
+    return Object.freeze({
+      ...snapshot,
+      state: safe ? 'RELEASE_PENDING' : 'SECURITY_LOCKED',
+      nextActionAt: now,
+      effect: safe ? 'RELEASE_PACKET' : 'SECURITY_LOCK',
+    });
+  }
+  return Object.freeze({ ...snapshot, effect: 'NONE' });
+}
+
+export function ownerContinuityMonitorAction(
+  snapshot: ContinuityMonitorSnapshot,
+  action: 'ARM' | 'CHECK_IN' | 'SNOOZE' | 'CANCEL' | 'DENY',
+  now: Date,
+  options: Readonly<{ recentSuccessfulTest?: boolean; snoozeHours?: number }> = {},
+): ContinuityMonitorSnapshot {
+  validateContinuityMonitorPolicy(snapshot.policy);
+  if (!Number.isFinite(now.getTime()))
+    throw new DomainError('MONITOR_TIME_INVALID', 'Continuity monitor time is invalid.');
+  if (action === 'ARM') {
+    if (!['DISABLED', 'SECURITY_LOCKED', 'DELIVERY_FAILED'].includes(snapshot.state))
+      throw new DomainError(
+        'MONITOR_ACTION_INVALID',
+        'The monitor cannot be armed from its current state.',
+      );
+    if (!options.recentSuccessfulTest)
+      throw new DomainError(
+        'MONITOR_TEST_REQUIRED',
+        'A recent successful monitor test is required.',
+      );
+    const due = new Date(now.getTime() + days(snapshot.policy.checkInIntervalDays));
+    return Object.freeze({
+      ...snapshot,
+      state: 'ARMED',
+      nextActionAt: due,
+      cycleDueAt: due,
+      reminderIndex: 0,
+    });
+  }
+  if (action === 'CHECK_IN') {
+    if (['AUTOMATICALLY_RELEASED', 'CANCELLED', 'OWNER_DENIED'].includes(snapshot.state))
+      throw new DomainError('MONITOR_ACTION_INVALID', 'The monitor can no longer be checked in.');
+    const due = new Date(now.getTime() + days(snapshot.policy.checkInIntervalDays));
+    return Object.freeze({
+      ...snapshot,
+      state: 'ARMED',
+      nextActionAt: due,
+      cycleDueAt: due,
+      reminderIndex: 0,
+    });
+  }
+  if (action === 'SNOOZE') {
+    const snoozeHours = options.snoozeHours ?? 24;
+    if (!Number.isInteger(snoozeHours) || snoozeHours < 1 || snoozeHours > 168)
+      throw new DomainError('SNOOZE_INVALID', 'Snooze must be 1 to 168 hours.');
+    if (!['CHECK_IN_DUE', 'REMINDERS_ACTIVE', 'GRACE_PERIOD'].includes(snapshot.state))
+      throw new DomainError(
+        'MONITOR_ACTION_INVALID',
+        'The monitor cannot be snoozed from its current state.',
+      );
+    const due = new Date(now.getTime() + hours(snoozeHours));
+    return Object.freeze({
+      ...snapshot,
+      state: 'SNOOZED',
+      nextActionAt: due,
+      cycleDueAt: due,
+      reminderIndex: 0,
+    });
+  }
+  if (action === 'CANCEL') {
+    if (['AUTOMATICALLY_RELEASED', 'OWNER_DENIED'].includes(snapshot.state))
+      throw new DomainError('MONITOR_ACTION_INVALID', 'The monitor can no longer be cancelled.');
+    return Object.freeze({ ...snapshot, state: 'CANCELLED', nextActionAt: now });
+  }
+  if (['AUTOMATICALLY_RELEASED', 'CANCELLED'].includes(snapshot.state))
+    throw new DomainError('MONITOR_ACTION_INVALID', 'The monitor can no longer be denied.');
+  return Object.freeze({ ...snapshot, state: 'OWNER_DENIED', nextActionAt: now });
 }
 
 export function transitionRelease(

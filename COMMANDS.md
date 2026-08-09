@@ -15,6 +15,7 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Format check: `sh scripts/format-check.sh`
 - Format source: `pnpm exec prettier --write .`
 - Restore scope drift: `git restore -- <explicit-paths>`
+- Stage reviewed scope while preserving pre-existing unrelated changes: `git add -- <explicit-paths>`
 - Typecheck: `sh scripts/typecheck.sh`
 - Unit: `sh scripts/test-unit.sh`
 - Integration: `sh scripts/test-integration.sh`
