@@ -116,7 +116,7 @@ Re-enter from the last milestone commit. Read ledger and progress. Re-run the la
 - [x] M3 complete with evidence and commit.
 - [x] M4 complete with evidence and commit.
 - [x] M5 complete with evidence and commit.
-- [ ] M6 pending.
+- [x] M6 complete with evidence and commit.
 
 # 12. Surprises & Discoveries
 Append dated evidence only.
@@ -142,4 +142,11 @@ Complete after verification with files, commands, sentinels, risks, and follow-u
 - Three final local passes emitted `verify: ok`; the last two also emitted `container rehearsal: ok`. Expected readiness/release/handoff files and healthy local dependencies were audited.
 - `REMOTE_SESSION_HANDOFF.md` consolidates every graph node, subsystem, external requirement, probe, validation, legal/business action, known risk, resume command, and operator action.
 - EP-010 is engineering complete but externally unverified. No `NODE_DONE`, `green/EP-010`, semantic release tag, registry push, external mutation, or production deployment is permitted.
+- M4-M6 add the owner-controlled continuity monitor, recipient verification and redemption,
+  stable scheduled jobs, digital release, Lob/PostGrid ports, a global operational kill switch,
+  accessibility coverage, and LF-15's real PostgreSQL/Valkey/MinIO/Mailpit release proof.
+- The final aggregate run emitted `verify: ok` with 51 unit/security, 20 integration/contract,
+  5 E2E, 12 browser tests, LF-01 through LF-15, backup, and restore. The enclosing ship gate then
+  failed closed at `production readiness: FAIL - NODE_ENV must be production`, before external
+  evidence validation or mutation.
 - After the build-environment recovery, a fresh sourced-environment run emitted `verify: ok`; the enclosing ship gate then exited 1 with `production readiness: FAIL - legal approval evidence missing`.

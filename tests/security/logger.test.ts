@@ -64,5 +64,7 @@ describe('privacy-safe observability', () => {
       }).result,
     ).toBe('denied');
     expect(runbookForAlert('packet-isolation-failure')).toBe('unauthorized-packet-exposure');
+    expect(runbookForAlert('continuity-scheduler-lag')).toBe('continuity-scheduler-lag');
+    expect(runbookForAlert('physical-mail-ambiguous-submission')).toBe('physical-mail-ambiguity');
   });
 });

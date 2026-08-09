@@ -114,7 +114,11 @@ export const operationalMetricNames = [
   'malware_results_total',
   'packet_generation_total',
   'release_transitions_total',
+  'continuity_monitor_actions_total',
+  'continuity_scheduler_lag_seconds',
   'owner_notifications_total',
+  'physical_mail_orders_total',
+  'physical_mail_events_total',
   'manual_reviews_total',
   'ai_cache_tokens_total',
   'ai_cost_total',
@@ -139,6 +143,9 @@ export type OperationalAlert =
   | 'unauthorized-release-attempt'
   | 'unusual-recipient-velocity'
   | 'owner-notification-failure'
+  | 'continuity-scheduler-lag'
+  | 'physical-mail-ambiguous-submission'
+  | 'physical-mail-delivery-failure'
   | 'packet-isolation-failure'
   | 'verification-ambiguity'
   | 'kms-failure'
@@ -151,6 +158,9 @@ const alertRunbooks: Readonly<Record<OperationalAlert, string>> = {
   'unauthorized-release-attempt': 'fraudulent-emergency-request',
   'unusual-recipient-velocity': 'fraudulent-emergency-request',
   'owner-notification-failure': 'owner-notice-failure',
+  'continuity-scheduler-lag': 'continuity-scheduler-lag',
+  'physical-mail-ambiguous-submission': 'physical-mail-ambiguity',
+  'physical-mail-delivery-failure': 'physical-mail-delivery-failure',
   'packet-isolation-failure': 'unauthorized-packet-exposure',
   'verification-ambiguity': 'fraudulent-emergency-request',
   'kms-failure': 'kms-failure',

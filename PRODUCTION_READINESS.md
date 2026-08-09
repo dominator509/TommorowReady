@@ -3,7 +3,7 @@
 Production is permitted only when every item below has a current evidence command or approved artifact.
 
 ## Functional
-- LF-01 through LF-14 pass in one fresh run.
+- LF-01 through LF-15 pass in one fresh run; LF-15 exercises the owner-armed continuity release through real PostgreSQL, Valkey scheduling, deterministic PDF rendering, private MinIO storage, and Mailpit delivery.
 - Every specification behavior is implemented.
 - Packet recipients cannot enumerate or access unrelated packets.
 - Emergency release follows the exact deterministic state machine.
@@ -30,7 +30,8 @@ Production is permitted only when every item below has a current evidence comman
 
 ## Reliability and operations
 - Backup and restore are proven.
-- Queue replay does not duplicate release.
+- Queue replay, worker restart, and repeated check-in scheduling do not duplicate release or postal submission.
+- `CONTINUITY_AUTOMATION_ENABLED=no` blocks new arming and defers existing timers without state advancement; production starts paused until staging evidence is approved.
 - Notification failure during challenge alerts operations and does not silently continue.
 - Incident, compromised-recipient, fraudulent-request, and unauthorized-release runbooks are exercised.
 - RPO and RTO are documented and tested.
@@ -55,12 +56,14 @@ The ship gate is: clean state -> `sh scripts/verify.sh` -> `sh scripts/productio
 
 Required record keys are `legalApproval`, `vendorRiskApproval`, `insuranceCoverage`, `penetrationTest`, `policyPublication`, `productionKmsProbe`, `productionBackupRestore`, `monitoringAlertDelivery`, `stagingSmoke`, `rollbackDrill`, `dnsTlsWafReview`, `providerLiveFire`, `incidentExercise`, `rpoRtoExercise`, and `deploymentPlanApproval`. Configuration presence alone is not proof: the hashes and references must resolve to the genuine scoped evidence reviewed by the release owner.
 
-## Current evidence — 2026-08-07
+## Current evidence — 2026-08-09
 
 | Gate | Current evidence | Status |
 |---|---|---|
-| Complete local verification | `verify: ok`; 46 unit/security, 14 integration/contract, 5 API/performance E2E, 10 Chromium accessibility/WebAuthn tests | Passed locally |
-| Core outcomes | LF-01 through LF-14 each emitted `ok`; aggregate `live-fire: ok` | Passed against real local dependencies |
+| Complete local verification | `verify: ok`; 51 unit/security, 20 integration/contract, 5 API/performance E2E, 12 Chromium accessibility/WebAuthn tests | Passed locally |
+| Automated continuity release | LF-15 completed through real PostgreSQL, Valkey scheduling, deterministic PDF rendering, immutable MinIO storage, and Mailpit delivery; staged scan covered 235 tracked files | Passed locally |
+| Physical-mail adapters | Lob and PostGrid deterministic HTTP contracts and both signed webhook formats pass; partial configuration fails closed | Engineering complete; authenticated sandbox/live delivery deferred |
+| Core outcomes | LF-01 through LF-15 each emitted `ok`; aggregate `live-fire: ok` | Passed against real local dependencies |
 | Backup and restore | `backup: ok`; `restore drill: ok` against an isolated PostgreSQL database | Passed locally |
 | Container release rehearsal | `container rehearsal: ok`; API, web, and active Redis Streams worker ran non-root with dependency-aware readiness against real PostgreSQL and Valkey | Passed locally |
 | Immutable local images | API `3b4eddb70894...`; web `51abfab7a521...`; worker `9e5eac162883...` match the final rehearsal manifest; test/compiler packages are not runtime-resolvable | Passed locally |

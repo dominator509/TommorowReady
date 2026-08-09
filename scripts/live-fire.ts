@@ -14,10 +14,12 @@ import {
 } from '../packages/infrastructure/database/src/index.js';
 import {
   RealEmail,
+  RealJobQueue,
   RealObjectStorage,
   RealQueue,
 } from '../packages/infrastructure/database/src/services.js';
 import { renderDeterministicBinder } from '../apps/report-renderer/src/index.js';
+import { createContinuityJobHandler } from '../apps/worker/src/index.js';
 
 try {
   loadEnvFile('.env');
@@ -28,7 +30,7 @@ const env = (name: string): string => {
   return value;
 };
 const proof = process.argv[process.argv.indexOf('--proof') + 1];
-if (!/^LF-(0[1-9]|1[0-4])$/.test(proof ?? '')) throw new Error('LIVE_FIRE_PROOF_REQUIRED');
+if (!/^LF-(0[1-9]|1[0-5])$/.test(proof ?? '')) throw new Error('LIVE_FIRE_PROOF_REQUIRED');
 await migrateDatabase(env('DATABASE_MIGRATION_URL'));
 const repository = new PostgresContinuityRepository(env('DATABASE_URL'));
 const service = new ContinuityService(repository);
@@ -356,6 +358,91 @@ try {
         'MANUAL_REVIEW_REQUIRED'
       )
         throw new Error('AMBIGUITY_NOT_SAFE');
+      break;
+    }
+    case 'LF-15': {
+      const owner = await repository.bootstrapOwner({
+        email: `continuity-live-fire-${crypto.randomUUID()}@example.invalid`,
+        passwordHash: 'live-fire-owner-not-used-for-authentication',
+        householdName: 'Continuity Live Fire Household',
+      });
+      const monitorContext = {
+        tenantId: owner.tenantId,
+        householdId: owner.householdId,
+        actorId: owner.userId,
+        purpose: 'live-fire LF-15 automated continuity release',
+      };
+      const monitorService = new ContinuityService(repository);
+      const item = await monitorService.createRecord(monitorContext, 'person', {
+        name: 'Owner-approved continuity contact',
+      });
+      const recipientId = crypto.randomUUID();
+      const manifest = await monitorService.createPacket(monitorContext, {
+        purpose: 'automated continuity live fire',
+        recipientId,
+        itemIds: [item.id],
+      });
+      const verification = await repository.createRecipientVerification(
+        monitorContext,
+        recipientId,
+        'recipient@example.invalid',
+      );
+      await repository.completeRecipientVerification({
+        tenantId: owner.tenantId,
+        householdId: owner.householdId,
+        profileId: verification.profileId,
+        token: verification.token,
+      });
+      const monitor = await repository.createContinuityMonitor(monitorContext, {
+        packetId: manifest.packetId,
+        recipientId,
+        checkInIntervalDays: 1,
+        reminderOffsetsHours: [0, 1],
+        gracePeriodHours: 24,
+        releaseDelayHours: 1,
+        digitalDelivery: true,
+      });
+      await repository.markContinuityMonitorTested(monitorContext, monitor.id);
+      await repository.applyContinuityMonitorAction(monitorContext, monitor.id, 'ARM');
+      const queue = new RealJobQueue(env('REDIS_URL'));
+      const storage = new RealObjectStorage(
+        env('S3_BUCKET'),
+        env('S3_ENDPOINT'),
+        env('S3_ACCESS_KEY_ID'),
+        env('S3_SECRET_ACCESS_KEY'),
+      );
+      await storage.ensureBucket();
+      let clock = new Date(Date.now() + 2 * 86_400_000);
+      const handler = createContinuityJobHandler({
+        repository,
+        queue,
+        storage,
+        notifier: new RealEmail(env('SMTP_URL')),
+        baseUrl: env('APP_BASE_URL'),
+        providers: {},
+        automationEnabled: true,
+        now: () => clock,
+      });
+      const job = {
+        id: crypto.randomUUID(),
+        tenantId: owner.tenantId,
+        householdId: owner.householdId,
+        type: 'continuity-monitor' as const,
+        resourceId: monitor.id,
+        idempotencyKey: `continuity-live-fire:${monitor.id}`,
+        attempt: 1,
+      };
+      let finalState = '';
+      for (let step = 0; step < 10; step += 1) {
+        await handler(job);
+        const stored = await repository.get(monitorContext, 'continuityMonitor', monitor.id);
+        finalState = String(stored?.payload.state ?? '');
+        if (['AUTOMATICALLY_RELEASED', 'DELIVERY_FAILED'].includes(finalState)) break;
+        clock = new Date(clock.getTime() + 2 * 86_400_000);
+      }
+      if (finalState !== 'AUTOMATICALLY_RELEASED')
+        throw new Error(`CONTINUITY_LIVE_FIRE_FAILED:${finalState}`);
+      await queue.close();
       break;
     }
   }
