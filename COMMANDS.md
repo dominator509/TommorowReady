@@ -48,6 +48,10 @@ export CI=true GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat DEBIAN_FRONTEND=non
 - Local owner bootstrap: `pnpm exec tsx scripts/bootstrap-local-owner.ts` (writes ignored mode-0600 credentials to `.agent/state/local-credentials/owner.json`; never prints secrets)
 - Load local environment: `set -a; . ./.env; set +a`
 - External requirements inventory: `sh scripts/external-requirements.sh`
+- Hosted CI runs for an explicit commit: `gh run list --commit <commit-sha> --limit 10 --json databaseId,workflowName,status,conclusion,event,headSha,url`
+- Hosted CI run detail: `gh run view <run-id> --json databaseId,workflowName,status,conclusion,event,headSha,url,jobs`
+- Hosted workflow registration: `gh workflow list --all`
+- Publish reviewed `main`: `git push origin main`
 - Lob authenticated read-only probe: `sh scripts/probes/lob_api_key.sh`
 - PostGrid authenticated read-only probe: `sh scripts/probes/postgrid_api_key.sh`
 - Local start: `pnpm start > .agent/state/local.log 2>&1 & echo $! > .agent/state/local.pid; i=0; until curl -fsS http://127.0.0.1:4000/health/ready >/dev/null; do i=$((i+1)); [ "$i" -lt 30 ] || exit 1; sleep 2; done`

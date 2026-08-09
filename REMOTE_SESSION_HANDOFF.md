@@ -19,7 +19,7 @@ The ship gate reran the complete local verifier, emitted `verify: ok`, and exite
 
 | Subsystem | Status | Completed and passing | External verification remaining | Known risk |
 |---|---|---|---|---|
-| Toolchain and repository | Green | Pinned Node/pnpm workspace, ignored local secrets, immutable Actions, CI browser dependencies, preflight | Hosted CI has not run in this local-only session | GitHub runner/environment drift |
+| Toolchain and repository | Green | Pinned Node/pnpm workspace, ignored local secrets, immutable Actions, CI browser dependencies, preflight; push-triggered GitHub Actions run `31295784954` passed for commit `c8a6f04792736942f4cff2b0c0b412a08e3120a2` | No external verification remains for that immutable commit; every later commit requires its own successful run | GitHub runner/environment drift after the evidenced commit |
 | Domain and invariants | Green locally | Confirmed-only readiness, scoped helpers, canonical packet hashes, deterministic release state machine, property tests | Independent threat-model and penetration-test approval | Real adversarial assessment absent |
 | PostgreSQL and persistence | Green locally | Canonical schema, migrations, forced RLS, distinct non-superuser app role, append-only evidence, backup/restore | Managed database, production backups, RPO/RTO | Local single-host durability only |
 | API and application | Green locally | Versioned routes, schema/context validation, safe errors, audit, real readiness | Staging ingress, production auth traffic, provider callbacks | Production edge and identity not exercised |

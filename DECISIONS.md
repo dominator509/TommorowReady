@@ -1,5 +1,23 @@
 # Decisions
 
+## ADR-023: Preserve direct reviewed main publishing
+
+- Date: 2026-08-09
+- Status: Accepted
+- Context: The operator explicitly requested that all reviewed work be pushed to `dominator509/TommorowReady` on `main`, and the repository already tracks `origin/main`.
+- Decision: Record the exact non-force `git push origin main` command. Run it only after local verification, scope review, intentional commit, and secret scanning.
+- Alternatives: Force push (prohibited); leave verified evidence local-only (contradicts the operator's publication instruction); open an unrelated pull request (not requested for this owner-controlled repository).
+- Consequences: Reviewed continuation evidence remains synchronized with GitHub. History rewriting and force push remain prohibited.
+
+## ADR-022: Inspect hosted CI with read-only GitHub CLI commands
+
+- Date: 2026-08-09
+- Status: Accepted
+- Context: EP-010's handoff stated that hosted CI had not run in the local-only session, but the verified commit is now on GitHub `main`. The GitHub connector's commit workflow lookup only exposes pull-request-triggered runs and returned no results for the pushed commit.
+- Decision: Add exact read-only `gh run list`, `gh run view`, and `gh workflow list` commands to `COMMANDS.md`, bound to an explicit commit SHA, an explicit run ID, or workflow registration. Use them to verify ordinary push-triggered Actions without mutating workflows or rerunning jobs. Resolve the SHA separately to avoid nested-shell substitution ambiguity on Windows.
+- Alternatives: Treat the connector's empty PR-run response as evidence that no CI exists (rejected because it excludes push runs); invent an unrecorded CLI command (rejected by repository command discipline).
+- Consequences: Hosted runner drift and CI status can be audited reproducibly. Reruns, cancellations, workflow dispatches, or configuration mutations still require separate authorization and documented commands.
+
 | ID                                                                                          | Decision                                                                                                                   | Rationale                                                                                                                                                       | Status                                                                   |
 | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | ADR-001                                                                                     | Modular monolith                                                                                                           | Lowest operating complexity with clear extraction boundaries                                                                                                    | Accepted                                                                 |

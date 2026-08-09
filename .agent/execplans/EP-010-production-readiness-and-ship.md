@@ -132,6 +132,10 @@ Append dated evidence only.
 - 2026-08-09: Repeated verification exposed Next.js development and production builds sharing one
   artifact directory. Phase-aware `.next-dev` isolation made build-then-browser and the aggregate
   verification order deterministic without weakening browser coverage or production CSP.
+- 2026-08-09: GitHub Actions push run `31295784954` completed successfully for immutable commit
+  `c8a6f04792736942f4cff2b0c0b412a08e3120a2`, including real services, locked install, Chromium,
+  migrations, the aggregate verifier, and teardown. Hosted CI is therefore evidenced for M6 rather
+  than merely assumed from the local result.
 
 # 13. Decision Log
 Append decisions with alternatives, evidence, and consequences.
@@ -150,3 +154,5 @@ Complete after verification with files, commands, sentinels, risks, and follow-u
   failed closed at `production readiness: FAIL - NODE_ENV must be production`, before external
   evidence validation or mutation.
 - After the build-environment recovery, a fresh sourced-environment run emitted `verify: ok`; the enclosing ship gate then exited 1 with `production readiness: FAIL - legal approval evidence missing`.
+- Push-triggered GitHub Actions run `31295784954` independently passed the aggregate verifier for
+  M6 commit `c8a6f04792736942f4cff2b0c0b412a08e3120a2` on Ubuntu 24.04.
